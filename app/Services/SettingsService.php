@@ -17,10 +17,17 @@ class SettingsService
         $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump([
             'command_open_ide' => null,
             'command_open_browser' => null,
+            'command_open_terminal' => null,
         ]));
 
         $yaml = Yaml::parse($this->getBaseFile(File::SETTINGS->value));
 
-        return SettingsData::from($yaml);
+        return SettingsData::from($yaml ?? []);
+    }
+
+    public function saveSettings(SettingsData $settings): void
+    {
+        $this->ensureBaseDirectoryExists();
+        $this->putBaseFile(File::SETTINGS->value, Yaml::dump($settings->toArray()));
     }
 }
