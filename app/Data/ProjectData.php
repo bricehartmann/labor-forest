@@ -7,11 +7,20 @@ use Spatie\LaravelData\Data;
 class ProjectData extends Data
 {
     public function __construct(
+        public string $uuid,
         public string $path,
     ) {}
 
     public function title(): string
     {
-        return str($this->path)->afterLast('/')->replace(['-', '_'], ' ')->ucWords()->toString();
+        return str($this->path)->afterLast(DIRECTORY_SEPARATOR)->replace(['-', '_'], ' ')->ucWords()->toString();
+    }
+
+    public static function rules(): array
+    {
+        return [
+            'uuid' => ['required', 'uuid'],
+            'path' => ['required', 'string'],
+        ];
     }
 }

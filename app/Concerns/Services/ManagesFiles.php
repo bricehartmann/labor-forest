@@ -39,7 +39,7 @@ trait ManagesFiles
 
     protected function makeRelativeBasePath(string $relative = ''): string
     {
-        return rtrim(Directory::BASE->value.'/'.$relative, '/');
+        return rtrim(Directory::BASE->value.DIRECTORY_SEPARATOR.$relative, DIRECTORY_SEPARATOR);
     }
 
     protected function ensureBaseDirectoryExists(): void

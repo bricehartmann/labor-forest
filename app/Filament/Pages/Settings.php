@@ -57,11 +57,11 @@ class Settings extends Page
                             ->label('Enable desktop notifications'),
                     ]),
                 Section::make('Open commands')
-                    ->description('Commands that are run to open a specific Workspace\'s directory or local site.')
+                    ->description('Commands that are run to open a specific workspace\'s directory or local site.')
                     ->schema([
                         TextInput::make('command_open_terminal')
                             ->label('Open terminal command')
-                            ->helperText('The command to run to open a terminal with a working directory of a specific Workspace.')
+                            ->helperText('The command to run to open a terminal with a working directory of a specific workspace.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a iterm')
                             ->rules([new ValidVariables])
                             ->suffixActions([
@@ -79,7 +79,7 @@ class Settings extends Page
                             ]),
                         TextInput::make('command_open_ide')
                             ->label('Default open IDE command')
-                            ->helperText('The command to run to open a Workspace in an IDE. Can be changed at the Project level.')
+                            ->helperText('The command to run to open a workspace in an IDE. Can be changed at the project level.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm')
                             ->rules([new ValidVariables])
                             ->suffixActions([
@@ -97,7 +97,7 @@ class Settings extends Page
                             ]),
                         TextInput::make('command_open_browser')
                             ->label('Default open browser command')
-                            ->helperText('The command to run to open a browser for a specific Workspace\'s local site. Can be changed at the Project level.')
+                            ->helperText('The command to run to open a browser for a specific workspace\'s local site. Can be changed at the project level.')
                             ->placeholder('open "{{ ENV_APP_URL }}"')
                             ->rules([new ValidVariables])
                             ->suffixActions([

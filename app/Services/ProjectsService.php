@@ -7,7 +7,11 @@ use App\Data\ProjectData;
 use App\Enums\Disk;
 use App\Enums\File;
 use App\Exceptions\InvalidProjectsFile;
+use App\Exceptions\ProjectDirectoryExists;
+use App\Exceptions\ProjectDirectoryNotFound;
+use App\Exceptions\ProjectDirectoryNotGitRepository;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
@@ -15,6 +19,41 @@ use Symfony\Component\Yaml\Yaml;
 class ProjectsService
 {
     use ManagesFiles;
+
+    /**
+     * @throws InvalidProjectsFile
+     * @throws ProjectDirectoryExists
+     * @throws ProjectDirectoryNotFound
+     * @throws ProjectDirectoryNotGitRepository
+     */
+    public function addProject(string $path): ProjectData
+    {
+        if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
+            throw new ProjectDirectoryNotFound($$path);
+        }
+
+        $projects = $this->loadProjects();
+
+        if ($projects->contains('path', $path)) {
+            throw new ProjectDirectoryExists($path);
+        }
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($path.DIRECTORY_SEPARATOR.'.git')) {
+            throw new ProjectDirectoryNotGitRepository($path);
+        }
+
+        $newProject = new ProjectData(
+            uuid: Str::uuid()->toString(),
+            path: $path,
+        );
+
+        $projects->push($newProject);
+
+        $this->ensureBaseDirectoryExists();
+        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray()));
+
+        return $newProject;
+    }
 
     /**
      * @return Collection<int, ProjectData>
