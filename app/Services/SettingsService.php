@@ -20,11 +20,7 @@ class SettingsService
     public function loadSettings(): SettingsData
     {
         $this->ensureBaseDirectoryExists();
-        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump([
-            'command_open_ide' => null,
-            'command_open_browser' => null,
-            'command_open_terminal' => null,
-        ]));
+        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump((new SettingsData)->toArray()));
 
         $path = $this->makeRelativeBasePath(File::SETTINGS->value);
 

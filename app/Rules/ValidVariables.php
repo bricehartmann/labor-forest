@@ -2,7 +2,7 @@
 
 namespace App\Rules;
 
-use App\Enums\Variables;
+use App\Enums\Variable;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Translation\PotentiallyTranslatedString;
@@ -48,13 +48,13 @@ final class ValidVariables implements ValidationRule
 
         if ($unknownVariables !== []) {
             $fail(sprintf(
-                'The :attribute contains unknown variables: %s.',
+                'Unknown variables: %s.',
                 implode(', ', array_unique($unknownVariables)),
             ));
         }
 
         if (str_contains($remainder, '{{') || str_contains($remainder, '}}')) {
-            $fail('The :attribute contains an unterminated {{ }} placeholder.');
+            $fail('Unterminated {{ }} placeholder.');
         }
     }
 
@@ -63,7 +63,7 @@ final class ValidVariables implements ValidationRule
      */
     private function isRecognizedVariable(string $name): bool
     {
-        return Variables::tryFrom($name) !== null
+        return Variable::tryFrom($name) !== null
             || preg_match(self::ENV_VARIABLE, $name) === 1;
     }
 }

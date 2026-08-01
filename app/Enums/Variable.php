@@ -2,7 +2,7 @@
 
 namespace App\Enums;
 
-enum Variables: string
+enum Variable: string
 {
     case PROJECT_PRIMARY_DIR = 'PROJECT_PRIMARY_DIR';
     case PROJECT_SLUG_KEBAB = 'PROJECT_SLUG_KEBAB';
