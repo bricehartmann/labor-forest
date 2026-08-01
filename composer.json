@@ -13,7 +13,8 @@
         "filament/filament": "^5.0",
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0",
-        "nativephp/desktop": "^2.2"
+        "nativephp/desktop": "^2.2",
+        "spatie/laravel-data": "^4.23"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
