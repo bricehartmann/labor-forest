@@ -2,9 +2,13 @@
 
 namespace App\Filament\Pages;
 
+use App\Data\SettingsData;
+use App\Exceptions\InvalidSettingsFile;
+use App\Rules\ValidVariables;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -19,7 +23,20 @@ class Settings extends Page
 
     public function mount(): void
     {
-        $this->form->fill(app(SettingsService::class)->loadSettings()->toArray());
+        try {
+            $settings = app(SettingsService::class)->loadSettings();
+        } catch (InvalidSettingsFile $e) {
+            Notification::make()
+                ->danger()
+                ->title('Your settings file is invalid')
+                ->body($e->messagesAsString())
+                ->persistent()
+                ->send();
+
+            $settings = new SettingsData;
+        }
+
+        $this->form->fill($settings->toArray());
     }
 
     public function form(Schema $schema): Schema
@@ -28,16 +45,22 @@ class Settings extends Page
             ->components([
                 TextInput::make('command_open_terminal')
                     ->label('Open terminal command')
-                    ->placeholder('open "{{ WORKSPACE_DIR }}" -a iterm'),
+                    ->placeholder('open "{{ WORKSPACE_DIR }}" -a iterm')
+                    ->rules([new ValidVariables]),
                 TextInput::make('command_open_ide')
                     ->label('Open IDE command')
-                    ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm'),
+                    ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm')
+                    ->rules([new ValidVariables]),
                 TextInput::make('command_open_browser')
                     ->label('Open browser command')
-                    ->placeholder('open "{{ ENV_APP_URL }}"'),
+                    ->placeholder('open "{{ ENV_APP_URL }}"')
+                    ->rules([new ValidVariables]),
             ])
             ->statePath('data');
     }
 
-    public function save(): void {}
+    public function save(): void
+    {
+        $this->form->getState();
+    }
 }

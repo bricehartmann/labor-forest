@@ -18,7 +18,7 @@ trait ManagesFiles
     protected function ensureFileExists(string $path, string $disk, ?string $contents = null): void
     {
         if (! Storage::disk($disk)->exists($path)) {
-            Storage::disk($disk)->put($path, $contents);
+            Storage::disk($disk)->put($path, $contents ?? '');
         }
     }
 

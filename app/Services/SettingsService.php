@@ -5,12 +5,18 @@ namespace App\Services;
 use App\Concerns\Services\ManagesFiles;
 use App\Data\SettingsData;
 use App\Enums\File;
+use App\Exceptions\InvalidSettingsFile;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 class SettingsService
 {
     use ManagesFiles;
 
+    /**
+     * @throws InvalidSettingsFile when the file is unparseable, malformed, or fails validation
+     */
     public function loadSettings(): SettingsData
     {
         $this->ensureBaseDirectoryExists();
@@ -20,9 +26,23 @@ class SettingsService
             'command_open_terminal' => null,
         ]));
 
-        $yaml = Yaml::parse($this->getBaseFile(File::SETTINGS->value));
+        $path = $this->makeRelativeBasePath(File::SETTINGS->value);
 
-        return SettingsData::from($yaml ?? []);
+        try {
+            $yaml = Yaml::parse($this->getBaseFile(File::SETTINGS->value));
+        } catch (ParseException $e) {
+            throw InvalidSettingsFile::fromParseError($path, $e);
+        }
+
+        if ($yaml !== null && ! is_array($yaml)) {
+            throw InvalidSettingsFile::notAMapping($path, get_debug_type($yaml));
+        }
+
+        try {
+            return SettingsData::validateAndCreate($yaml ?? []);
+        } catch (ValidationException $e) {
+            throw InvalidSettingsFile::fromValidation($path, $e);
+        }
     }
 
     public function saveSettings(SettingsData $settings): void
