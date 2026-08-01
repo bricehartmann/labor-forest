@@ -25,6 +25,7 @@ class AppPanelProvider extends PanelProvider
             ->id('app')
             ->brandName('🌲 LaborForest')
             ->path('')
+            ->viteTheme('resources/css/filament/app/theme.css')
             ->darkMode(false)
             ->colors([
                 'primary' => Color::Zinc,

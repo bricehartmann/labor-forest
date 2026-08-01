@@ -28,11 +28,13 @@ class Settings extends Page
             ->components([
                 TextInput::make('command_open_terminal')
                     ->label('Open terminal command')
-                    ->placeholder('open {{ WORKSPACE_DIR }} -a iterm'),
+                    ->placeholder('open "{{ WORKSPACE_DIR }}" -a iterm'),
                 TextInput::make('command_open_ide')
-                    ->label('Open IDE command'),
+                    ->label('Open IDE command')
+                    ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm'),
                 TextInput::make('command_open_browser')
-                    ->label('Open browser command'),
+                    ->label('Open browser command')
+                    ->placeholder('open "{{ ENV_APP_URL }}"'),
             ])
             ->statePath('data');
     }
