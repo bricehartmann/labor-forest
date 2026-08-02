@@ -14,8 +14,9 @@
             </x-slot>
         </x-filament::callout>
     @else
-        <div class="flex justify-end">
+        <div class="flex justify-end gap-4">
             {{ $this->editLaunchCommands }}
+            {{ $this->removeAction }}
         </div>
 
         {{ $this->table }}

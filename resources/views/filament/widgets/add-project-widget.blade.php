@@ -1,7 +1,7 @@
 <x-filament-widgets::widget>
     <x-filament::section>
         <x-slot name="heading">
-            Add new project
+            Add project
         </x-slot>
         <x-slot name="description">
             Click the button below to select a directory and add it as a project.

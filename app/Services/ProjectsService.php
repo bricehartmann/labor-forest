@@ -28,6 +28,13 @@ class ProjectsService
 {
     use ManagesFiles;
 
+    public function removeProject(string $uuid): void
+    {
+        $this->ensureBaseDirectoryExists();
+        $projects = $this->loadProjects()->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid);
+        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
+    }
+
     /**
      * @throws InvalidProjectsFile
      * @throws ProjectDirectoryNotFound

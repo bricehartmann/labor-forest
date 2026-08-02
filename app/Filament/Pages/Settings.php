@@ -53,7 +53,7 @@ class Settings extends Page
         return $schema
             ->components([
                 Section::make('Notifications')
-                    ->description('Choose if you would like to be notified when a Workflow run concludes.')
+                    ->description('Choose if you would like to be notified when a workflow run concludes.')
                     ->schema([
                         Checkbox::make('desktop_notifications')
                             ->label('Enable desktop notifications'),

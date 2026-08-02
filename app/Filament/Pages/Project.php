@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Data\ProjectData;
 use App\Data\WorkspaceData;
+use App\Enums\Directory;
 use App\Enums\Variable;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidProjectsFile;
@@ -92,12 +93,37 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         return $this->projectData->dirName();
     }
 
+    public function removeAction(): Action
+    {
+        return Action::make('remove')
+            ->label('Remove project')
+            ->button()
+            ->color('danger')
+            ->requiresConfirmation()
+            ->modalHeading('Remove project')
+            ->modalDescription(new HtmlString('Are you sure you want to remove this project?<br/><br/>This action will not remove the <code>'.Directory::BASE->value.'</code> directory.'))
+            ->modalSubmitActionLabel('Remove')
+            ->modalCancelActionLabel('Cancel')
+            ->modalFooterActionsAlignment(Alignment::End)
+            ->action(function () {
+                static::resultNotificationOperation(
+                    callback: function () {
+                        app(ProjectsService::class)->removeProject($this->projectData->uuid);
+
+                        $this->redirect('/');
+                    },
+                    successTitle: 'Project removed',
+                    failureBody: fn (Throwable $th) => $th->getMessage(),
+                );
+            });
+    }
+
     public function editLaunchCommandsAction(): Action
     {
         $settings = app(SettingsService::class)->loadSettings();
 
         return Action::make('editLaunchCommands')
-            ->label('Edit Launch Commands')
+            ->label('Edit launch commands')
             ->button()
             ->modal()
             ->modalHeading('Edit Launch Commands')

@@ -29,7 +29,7 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
             ->color('primary')
             ->action(function () {
                 $path = Dialog::new()
-                    ->title('Select project directory')
+                    ->title('Select Project Directory')
                     ->folders()
                     ->open();
 
