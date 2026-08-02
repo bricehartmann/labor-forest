@@ -111,6 +111,18 @@ class ProjectsService
         return $workspaces;
     }
 
+    public function updateProjectWorkspaceStatus(string $path, WorkspaceStatus $workspaceStatus): void
+    {
+        $statusPath = implode(DIRECTORY_SEPARATOR, [
+            $path,
+            Directory::BASE->value,
+            Directory::IGNORED->value,
+            File::STATUS->value,
+        ]);
+
+        \Illuminate\Support\Facades\File::put($statusPath, Yaml::dump((new WorkspaceStatusData($workspaceStatus))->toArray(), 10));
+    }
+
     protected function loadProjectWorkspaceStatus(string $path): WorkspaceStatus
     {
         $statusPath = implode(DIRECTORY_SEPARATOR, [

@@ -17,6 +17,7 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Pages\Page;
@@ -24,6 +25,7 @@ use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Alignment;
 use Filament\Support\Enums\TextSize;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -147,6 +149,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                         app(ProjectsService::class)->updateProject($projectData);
 
                         $this->loadProjectData($this->projectData->uuid);
+                        $this->resetTable();
                     },
                     successTitle: 'Launch commands updated',
                     failureBody: fn (Throwable $th) => $th->getMessage(),
@@ -221,6 +224,41 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->button()
                     ->label('Launch')
                     ->color('info'),
+                ActionGroup::make([
+                    Action::make('override_status')
+                        ->label('Override status')
+                        ->modal()
+                        ->modalWidth(Width::Small)
+                        ->modalHeading('Override Status')
+                        ->modalDescription('Override the status of the workspace.')
+                        ->modalSubmitActionLabel('Override')
+                        ->modalCancelActionLabel('Cancel')
+                        ->modalFooterActionsAlignment(Alignment::End)
+                        ->fillForm(fn (array $record) => [
+                            'status' => $record['status'],
+                        ])
+                        ->schema([
+                            Select::make('status')
+                                ->selectablePlaceholder(false)
+                                ->native(false)
+                                ->options([
+                                    WorkspaceStatus::READY->value => WorkspaceStatus::READY->getLabel(),
+                                    WorkspaceStatus::SUSPENDED->value => WorkspaceStatus::SUSPENDED->getLabel(),
+                                ]),
+                        ])
+                        ->action(function (array $record, array $data) {
+                            static::resultNotificationOperation(
+                                callback: function () use ($record, $data) {
+                                    app(ProjectsService::class)->updateProjectWorkspaceStatus($record['path'], WorkspaceStatus::from($data['status']));
+
+                                    $this->loadProjectData($this->projectData->uuid);
+                                    $this->resetTable();
+                                },
+                                successTitle: 'Status overridden',
+                                failureBody: fn (Throwable $th) => $th->getMessage(),
+                            );
+                        }),
+                ]),
             ])
             ->toolbarActions([
 
