@@ -6,10 +6,13 @@ use App\Concerns\Services\ManagesFiles;
 use App\Data\ProjectData;
 use App\Data\WorkflowData;
 use App\Data\WorkflowStepData;
+use App\Data\WorkspaceData;
+use App\Data\WorkspaceStatusData;
 use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
 use App\Enums\WorkflowStepType;
+use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\ProjectDirectoryExists;
 use App\Exceptions\ProjectDirectoryNotFound;
@@ -59,6 +62,49 @@ class ProjectsService
         $this->initializeProjectBaseDirectory($path);
 
         return $newProject;
+    }
+
+    /**
+     * @return Collection<int, WorkspaceData>
+     */
+    public function loadProjectWorkspaces(string $path): Collection
+    {
+        $worktrees = rescue(fn () => app(GitWorktreeService::class)->listWorktrees($path), []);
+
+        $workspaces = collect();
+
+        foreach ($worktrees as $worktree) {
+            $status = $this->loadProjectWorkspaceStatus($worktree->path);
+
+            $workspaceData = new WorkspaceData(
+                path: $worktree->path,
+                branch: $worktree->branch,
+                status: $status,
+            );
+
+            $workspaces->push($workspaceData);
+        }
+
+        return $workspaces;
+    }
+
+    protected function loadProjectWorkspaceStatus(string $path): WorkspaceStatus
+    {
+        $statusPath = implode(DIRECTORY_SEPARATOR, [
+            $path,
+            Directory::BASE->value,
+            Directory::IGNORED->value,
+            File::STATUS->value,
+        ]);
+
+        if (! \Illuminate\Support\Facades\File::isFile($statusPath)) {
+            return WorkspaceStatus::UNKNOWN;
+        }
+
+        $yaml = Yaml::parseFile($statusPath);
+        $workspaceStatusData = WorkspaceStatusData::from($yaml);
+
+        return $workspaceStatusData->status;
     }
 
     /**

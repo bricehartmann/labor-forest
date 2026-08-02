@@ -2,14 +2,7 @@
 
 namespace App\Enums;
 
-use Filament\Support\Contracts\HasLabel;
-
-enum NavigationGroup: string implements HasLabel
+enum NavigationGroup: string
 {
-    case PROJECTS = 'projects';
-
-    public function getLabel(): string
-    {
-        return ucwords($this->value);
-    }
+    case PROJECTS = 'Projects';
 }

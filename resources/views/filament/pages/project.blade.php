@@ -13,9 +13,7 @@
                 {{ $this->loadedInvalidMessage }}
             </x-slot>
         </x-filament::callout>
+    @else
+        {{ $this->table }}
     @endif
-
-    @dump($this->project)
-
-    @dump($this->worktrees)
 </x-filament-panels::page>

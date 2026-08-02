@@ -4,19 +4,29 @@ namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Data\ProjectData;
-use App\Data\WorktreeData;
+use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidProjectsFile;
-use App\Services\GitWorktreeService;
 use App\Services\ProjectsService;
 use Exception;
+use Filament\Actions\Concerns\InteractsWithActions;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Pages\Page;
-use Illuminate\Support\Collection;
+use Filament\Schemas\Concerns\InteractsWithSchemas;
+use Filament\Schemas\Contracts\HasSchemas;
+use Filament\Support\Enums\TextSize;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Table;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 
-class Project extends Page
+class Project extends Page implements HasActions, HasSchemas, HasTable
 {
     use HasResultNotificationOperations;
+    use InteractsWithActions;
+    use InteractsWithSchemas;
+    use InteractsWithTable;
 
     public ?string $loadedInvalidMessage = null;
 
@@ -26,7 +36,7 @@ class Project extends Page
     public array $project = [];
 
     #[Locked]
-    public array $worktrees = [];
+    public array $workspaces = [];
 
     protected string $view = 'filament.pages.project';
 
@@ -36,17 +46,13 @@ class Project extends Page
         return ProjectData::from($this->project);
     }
 
-    #[Computed]
-    public function worktreeData(): Collection
-    {
-        return collect(WorktreeData::collect($this->worktrees));
-    }
-
     public function mount(string $uuid): void
     {
+        $projectService = app(ProjectsService::class);
+
         try {
-            $this->project = app(ProjectsService::class)->loadProject($uuid)->toArray();
-            $this->worktrees = app(GitWorktreeService::class)->listWorktrees($this->projectData->path)->toArray();
+            $this->project = $projectService->loadProject($uuid)->toArray();
+            $this->workspaces = $projectService->loadProjectWorkspaces($this->projectData->path)->toArray();
         } catch (InvalidProjectsFile $e) {
             $this->loadedInvalidMessage = $e->messagesAsString();
         } catch (Exception $e) {
@@ -65,5 +71,27 @@ class Project extends Page
     public function getHeading(): string
     {
         return $this->projectData->title();
+    }
+
+    public function table(Table $table): Table
+    {
+        return $table
+            ->records(fn () => $this->workspaces)
+            ->columns([
+                TextColumn::make('branch'),
+                TextColumn::make('status')
+                    ->badge()
+                    ->size(TextSize::Large)
+                    ->color(fn ($state) => WorkspaceStatus::from($state)->getColor()),
+            ])
+            ->filters([
+                // ...
+            ])
+            ->recordActions([
+                // ...
+            ])
+            ->toolbarActions([
+                // ...
+            ]);
     }
 }
