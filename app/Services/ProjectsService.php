@@ -43,10 +43,10 @@ class ProjectsService
             \Illuminate\Support\Facades\File::makeDirectory($pathIgnoredDir);
         }
 
-        $pathGitIgnore = $pathIgnoredDir.DIRECTORY_SEPARATOR.'.gitignore';
+        $pathGitIgnore = $pathIgnoredDir.DIRECTORY_SEPARATOR.File::GIT_IGNORE->value;
 
         if (! \Illuminate\Support\Facades\File::isFile($pathGitIgnore)) {
-            \Illuminate\Support\Facades\File::put($pathGitIgnore, 'ignored/');
+            \Illuminate\Support\Facades\File::put($pathGitIgnore, '*'.PHP_EOL.'!'.File::GIT_IGNORE->value.PHP_EOL);
         }
 
         $pathWorkflowsDir = $pathBaseDir.DIRECTORY_SEPARATOR.Directory::WORKFLOWS->value;
@@ -70,7 +70,7 @@ class ProjectsService
 
             \Illuminate\Support\Facades\File::put($pathWorkflowUp, Yaml::dump([
                 $workflowUp->toArray(),
-            ]));
+            ], inline: 10));
         }
 
         $pathWorkflowDown = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_DOWN->value;
@@ -83,7 +83,7 @@ class ProjectsService
 
             \Illuminate\Support\Facades\File::put($pathWorkflowDown, Yaml::dump([
                 $workflowDown->toArray(),
-            ]));
+            ], inline: 10));
         }
     }
 
@@ -117,7 +117,7 @@ class ProjectsService
         $projects->push($newProject);
 
         $this->ensureBaseDirectoryExists();
-        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray()));
+        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
         $this->initializeProjectDirectory($path);
 
         return $newProject;

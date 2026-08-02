@@ -8,4 +8,5 @@ enum File: string
     case PROJECTS = 'projects.yaml';
     case WORKFLOW_UP = 'up.yaml';
     case WORKFLOW_DOWN = 'down.yaml';
+    case GIT_IGNORE = '.gitignore';
 }

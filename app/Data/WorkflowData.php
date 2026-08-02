@@ -12,5 +12,4 @@ class WorkflowData extends Data
         /** @var Collection<int, WorkflowStepData> */
         public Collection $steps,
     ) {}
-
 }

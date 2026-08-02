@@ -20,7 +20,7 @@ class SettingsService
     public function loadSettings(): SettingsData
     {
         $this->ensureBaseDirectoryExists();
-        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump((new SettingsData)->toArray()));
+        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump((new SettingsData)->toArray(), inline: 10));
 
         $path = $this->makeRelativeBasePath(File::SETTINGS->value);
 
@@ -44,6 +44,6 @@ class SettingsService
     public function saveSettings(SettingsData $settings): void
     {
         $this->ensureBaseDirectoryExists();
-        $this->putBaseFile(File::SETTINGS->value, Yaml::dump($settings->toArray()));
+        $this->putBaseFile(File::SETTINGS->value, Yaml::dump($settings->toArray(), inline: 10));
     }
 }
