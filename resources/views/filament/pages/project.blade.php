@@ -16,7 +16,7 @@
     @else
         <div class="flex justify-end gap-4">
             {{ $this->editLaunchCommands }}
-            {{ $this->removeAction }}
+            {{ $this->remove }}
         </div>
 
         {{ $this->table }}
