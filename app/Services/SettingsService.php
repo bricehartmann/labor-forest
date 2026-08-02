@@ -20,7 +20,12 @@ class SettingsService
     public function loadSettings(): SettingsData
     {
         $this->ensureBaseDirectoryExists();
-        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump((new SettingsData)->toArray(), inline: 10));
+        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump((new SettingsData(
+            desktop_notifications: true,
+            command_launch_ide: 'open "{{ WORKSPACE_DIR }}" -a phpstorm',
+            command_launch_browser: 'open "{{ ENV_APP_URL }}"',
+            command_launch_terminal: 'open "{{ WORKSPACE_DIR }}" -a iterm',
+        ))->toArray(), inline: 10));
 
         $path = $this->makeRelativeBasePath(File::SETTINGS->value);
 

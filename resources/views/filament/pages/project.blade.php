@@ -14,6 +14,10 @@
             </x-slot>
         </x-filament::callout>
     @else
+        <div class="flex justify-end">
+            {{ $this->editLaunchCommands }}
+        </div>
+
         {{ $this->table }}
     @endif
 </x-filament-panels::page>

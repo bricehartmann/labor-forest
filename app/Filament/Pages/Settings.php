@@ -65,6 +65,7 @@ class Settings extends Page
                             ->label('Launch terminal command')
                             ->helperText('The command to run to launch a terminal with a working directory of a specific workspace.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a iterm')
+                            ->nullable()
                             ->rules([new ValidVariables])
                             ->suffixActions([
                                 Action::make('command_launch_terminal_example')
@@ -83,6 +84,7 @@ class Settings extends Page
                             ->label('Default launch IDE command')
                             ->helperText('The command to run to launch a workspace directory in an IDE. Can be changed at the project level.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm')
+                            ->nullable()
                             ->rules([new ValidVariables])
                             ->suffixActions([
                                 Action::make('command_launch_ide_example')
@@ -101,6 +103,7 @@ class Settings extends Page
                             ->label('Default launch browser command')
                             ->helperText('The command to run to launch a browser for a specific workspace\'s local site. Can be changed at the project level.')
                             ->placeholder('open "{{ ENV_APP_URL }}"')
+                            ->nullable()
                             ->rules([new ValidVariables])
                             ->suffixActions([
                                 Action::make('command_launch_browser_example')

@@ -30,6 +30,29 @@ class ProjectsService
 
     /**
      * @throws InvalidProjectsFile
+     * @throws ProjectDirectoryNotFound
+     */
+    public function updateProject(ProjectData $projectData): void
+    {
+        $this->ensureBaseDirectoryExists();
+
+        $existingProjects = $this->loadProjects();
+        $newProjects = collect();
+
+        foreach ($existingProjects as $existingProject) {
+            if ($existingProject->uuid === $projectData->uuid) {
+                $newProjects->push($projectData);
+            } else {
+                $newProjects->push($existingProject);
+            }
+        }
+
+        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($newProjects->toArray(), inline: 10));
+        $this->initializeProjectBaseDirectory($projectData->path);
+    }
+
+    /**
+     * @throws InvalidProjectsFile
      * @throws ProjectDirectoryExists
      * @throws ProjectDirectoryNotFound
      * @throws ProjectDirectoryNotGitRepository
@@ -37,7 +60,7 @@ class ProjectsService
     public function addProject(string $path): ProjectData
     {
         if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
-            throw new ProjectDirectoryNotFound($$path);
+            throw new ProjectDirectoryNotFound($path);
         }
 
         $projects = $this->loadProjects();

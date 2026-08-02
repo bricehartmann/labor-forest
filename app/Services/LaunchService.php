@@ -12,7 +12,7 @@ class LaunchService
         $this->launch(
             projectData: $projectData,
             workspaceData: $workspaceData,
-            command: app(SettingsService::class)->loadSettings()->command_launch_terminal,
+            command: $projectData->command_launch_terminal ?? app(SettingsService::class)->loadSettings()->command_launch_terminal,
         );
     }
 
@@ -21,7 +21,7 @@ class LaunchService
         $this->launch(
             projectData: $projectData,
             workspaceData: $workspaceData,
-            command: app(SettingsService::class)->loadSettings()->command_launch_ide,
+            command: $projectData->command_launch_ide ?? app(SettingsService::class)->loadSettings()->command_launch_ide,
         );
     }
 
@@ -30,7 +30,7 @@ class LaunchService
         $this->launch(
             projectData: $projectData,
             workspaceData: $workspaceData,
-            command: app(SettingsService::class)->loadSettings()->command_launch_browser,
+            command: $projectData->command_launch_browser ?? app(SettingsService::class)->loadSettings()->command_launch_browser,
         );
     }
 
