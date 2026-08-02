@@ -194,7 +194,8 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                 IconColumn::make('is_primary')
                     ->label('Primary')
                     ->alignCenter()
-                    ->boolean(),
+                    ->boolean()
+                    ->falseColor('gray'),
                 TextColumn::make('branch')
                     ->grow(),
                 TextColumn::make('status')

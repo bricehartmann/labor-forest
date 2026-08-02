@@ -128,6 +128,7 @@ class ProjectsService
             File::STATUS->value,
         ]);
 
+        $this->initializeProjectBaseDirectory($path);
         \Illuminate\Support\Facades\File::put($statusPath, Yaml::dump((new WorkspaceStatusData($workspaceStatus))->toArray(), 10));
     }
 
