@@ -19,6 +19,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\TextSize;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -95,7 +96,9 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->recordActions([
                 ActionGroup::make([
                     Action::make('launch_terminal')
+                        ->label('Terminal')
                         ->hidden(empty($settings->command_launch_terminal))
+                        ->icon(Heroicon::ComputerDesktop)
                         ->action(function (array $record) {
                             $workspaceData = WorkspaceData::from($record);
 
@@ -108,7 +111,8 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             );
                         }),
                     Action::make('launch_ide')
-                        ->label('Launch IDE')
+                        ->label('IDE')
+                        ->icon(Heroicon::CodeBracket)
                         ->hidden(empty($settings->command_launch_ide))
                         ->action(function (array $record) {
                             $workspaceData = WorkspaceData::from($record);
@@ -122,7 +126,9 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             );
                         }),
                     Action::make('launch_browser')
+                        ->label('Browser')
                         ->hidden(empty($settings->command_launch_browser))
+                        ->icon(Heroicon::OutlinedGlobeAlt)
                         ->action(function (array $record) {
                             $workspaceData = WorkspaceData::from($record);
 
