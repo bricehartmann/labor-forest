@@ -4,10 +4,13 @@ namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Data\ProjectData;
+use App\Data\WorktreeData;
 use App\Exceptions\InvalidProjectsFile;
+use App\Services\GitWorktreeService;
 use App\Services\ProjectsService;
 use Exception;
 use Filament\Pages\Page;
+use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 
@@ -22,6 +25,9 @@ class Project extends Page
     #[Locked]
     public array $project = [];
 
+    #[Locked]
+    public array $worktrees = [];
+
     protected string $view = 'filament.pages.project';
 
     #[Computed]
@@ -30,10 +36,17 @@ class Project extends Page
         return ProjectData::from($this->project);
     }
 
+    #[Computed]
+    public function worktreeData(): Collection
+    {
+        return collect(WorktreeData::collect($this->worktrees));
+    }
+
     public function mount(string $uuid): void
     {
         try {
             $this->project = app(ProjectsService::class)->loadProject($uuid)->toArray();
+            $this->worktrees = app(GitWorktreeService::class)->listWorktrees($this->projectData->path)->toArray();
         } catch (InvalidProjectsFile $e) {
             $this->loadedInvalidMessage = $e->messagesAsString();
         } catch (Exception $e) {

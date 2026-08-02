@@ -16,4 +16,6 @@
     @endif
 
     @dump($this->project)
+
+    @dump($this->worktrees)
 </x-filament-panels::page>
