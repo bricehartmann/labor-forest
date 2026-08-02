@@ -9,18 +9,41 @@ class LaunchService
 {
     public function launchTerminal(ProjectData $projectData, WorkspaceData $workspaceData): void
     {
-        $settings = app(SettingsService::class)->loadSettings();
+        $this->launch(
+            projectData: $projectData,
+            workspaceData: $workspaceData,
+            command: app(SettingsService::class)->loadSettings()->command_launch_terminal,
+        );
+    }
 
-        if (! $settings->command_launch_terminal) {
+    public function launchIde(ProjectData $projectData, WorkspaceData $workspaceData): void
+    {
+        $this->launch(
+            projectData: $projectData,
+            workspaceData: $workspaceData,
+            command: app(SettingsService::class)->loadSettings()->command_launch_ide,
+        );
+    }
+
+    public function launchBrowser(ProjectData $projectData, WorkspaceData $workspaceData): void
+    {
+        $this->launch(
+            projectData: $projectData,
+            workspaceData: $workspaceData,
+            command: app(SettingsService::class)->loadSettings()->command_launch_browser,
+        );
+    }
+
+    private function launch(ProjectData $projectData, WorkspaceData $workspaceData, ?string $command): void
+    {
+        if (! $command) {
             return;
         }
 
-        $command = app(VariableReplacementService::class)->replace(
+        shell_exec(app(VariableReplacementService::class)->replace(
             projectData: $projectData,
             workspaceData: $workspaceData,
-            content: $settings->command_launch_terminal,
-        );
-
-        shell_exec($command);
+            content: $command,
+        ));
     }
 }

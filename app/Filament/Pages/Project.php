@@ -94,7 +94,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ])
             ->recordActions([
                 ActionGroup::make([
-                    Action::make('open_terminal')
+                    Action::make('launch_terminal')
                         ->hidden(empty($settings->command_launch_terminal))
                         ->action(function (array $record) {
                             $workspaceData = WorkspaceData::from($record);
@@ -107,13 +107,40 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
                             );
                         }),
+                    Action::make('launch_ide')
+                        ->label('Launch IDE')
+                        ->hidden(empty($settings->command_launch_ide))
+                        ->action(function (array $record) {
+                            $workspaceData = WorkspaceData::from($record);
+
+                            static::resultNotificationOperation(
+                                callback: function () use ($workspaceData) {
+                                    app(LaunchService::class)->launchIde($this->projectData, $workspaceData);
+                                },
+                                successTitle: 'IDE launched',
+                                failureBody: fn (Throwable $th) => $th->getMessage(),
+                            );
+                        }),
+                    Action::make('launch_browser')
+                        ->hidden(empty($settings->command_launch_browser))
+                        ->action(function (array $record) {
+                            $workspaceData = WorkspaceData::from($record);
+
+                            static::resultNotificationOperation(
+                                callback: function () use ($workspaceData) {
+                                    app(LaunchService::class)->launchBrowser($this->projectData, $workspaceData);
+                                },
+                                successTitle: 'Browser launched',
+                                failureBody: fn (Throwable $th) => $th->getMessage(),
+                            );
+                        }),
                 ])
                     ->button()
-                    ->label('Open')
+                    ->label('Launch')
                     ->color('info'),
             ])
             ->toolbarActions([
-                // ...
+
             ])
             ->paginated(false);
     }
