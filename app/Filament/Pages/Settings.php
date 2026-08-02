@@ -58,16 +58,16 @@ class Settings extends Page
                         Checkbox::make('desktop_notifications')
                             ->label('Enable desktop notifications'),
                     ]),
-                Section::make('Open commands')
-                    ->description('Commands that are run to open a specific workspace\'s directory or local site.')
+                Section::make('Launch commands')
+                    ->description('Commands that are run to launch an application with a specific workspace\'s directory or local site.')
                     ->schema([
-                        TextInput::make('command_open_terminal')
-                            ->label('Open terminal command')
-                            ->helperText('The command to run to open a terminal with a working directory of a specific workspace.')
+                        TextInput::make('command_launch_terminal')
+                            ->label('Launch terminal command')
+                            ->helperText('The command to run to launch a terminal with a working directory of a specific workspace.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a iterm')
                             ->rules([new ValidVariables])
                             ->suffixActions([
-                                Action::make('command_open_terminal_example')
+                                Action::make('command_launch_terminal_example')
                                     ->label('Show example')
                                     ->button()
                                     ->modal()
@@ -77,15 +77,15 @@ class Settings extends Page
                                     ->modalSubmitActionLabel('Use example')
                                     ->modalCancelActionLabel('Close')
                                     ->modalFooterActionsAlignment(Alignment::End)
-                                    ->action(fn (Set $set) => $set('command_open_terminal', 'open "{{ WORKSPACE_DIR }}" -a iterm')),
+                                    ->action(fn (Set $set) => $set('command_launch_terminal', 'open "{{ WORKSPACE_DIR }}" -a iterm')),
                             ]),
-                        TextInput::make('command_open_ide')
-                            ->label('Default open IDE command')
-                            ->helperText('The command to run to open a workspace in an IDE. Can be changed at the project level.')
+                        TextInput::make('command_launch_ide')
+                            ->label('Default launch IDE command')
+                            ->helperText('The command to run to launch a workspace directory in an IDE. Can be changed at the project level.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm')
                             ->rules([new ValidVariables])
                             ->suffixActions([
-                                Action::make('command_open_ide_example')
+                                Action::make('command_launch_ide_example')
                                     ->label('Show example')
                                     ->button()
                                     ->modal()
@@ -95,15 +95,15 @@ class Settings extends Page
                                     ->modalSubmitActionLabel('Use example')
                                     ->modalCancelActionLabel('Close')
                                     ->modalFooterActionsAlignment(Alignment::End)
-                                    ->action(fn (Set $set) => $set('command_open_ide', 'open "{{ WORKSPACE_DIR }}" -a phpstorm')),
+                                    ->action(fn (Set $set) => $set('command_launch_ide', 'open "{{ WORKSPACE_DIR }}" -a phpstorm')),
                             ]),
-                        TextInput::make('command_open_browser')
-                            ->label('Default open browser command')
-                            ->helperText('The command to run to open a browser for a specific workspace\'s local site. Can be changed at the project level.')
+                        TextInput::make('command_launch_browser')
+                            ->label('Default launch browser command')
+                            ->helperText('The command to run to launch a browser for a specific workspace\'s local site. Can be changed at the project level.')
                             ->placeholder('open "{{ ENV_APP_URL }}"')
                             ->rules([new ValidVariables])
                             ->suffixActions([
-                                Action::make('command_open_browser_example')
+                                Action::make('command_launch_browser_example')
                                     ->label('Show example')
                                     ->button()
                                     ->modal()
@@ -113,7 +113,7 @@ class Settings extends Page
                                     ->modalSubmitActionLabel('Use example')
                                     ->modalCancelActionLabel('Close')
                                     ->modalFooterActionsAlignment(Alignment::End)
-                                    ->action(fn (Set $set) => $set('command_open_browser', 'open "{{ ENV_APP_URL }}"')),
+                                    ->action(fn (Set $set) => $set('command_launch_browser', 'open "{{ ENV_APP_URL }}"')),
                             ]),
                         KeyValueEntry::make('variables')
                             ->label('Available variables')

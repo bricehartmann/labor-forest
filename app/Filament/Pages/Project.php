@@ -4,10 +4,15 @@ namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Data\ProjectData;
+use App\Data\WorkspaceData;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidProjectsFile;
+use App\Services\LaunchService;
 use App\Services\ProjectsService;
+use App\Services\SettingsService;
 use Exception;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Pages\Page;
@@ -20,6 +25,7 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Throwable;
 
 class Project extends Page implements HasActions, HasSchemas, HasTable
 {
@@ -67,11 +73,13 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
     public function getHeading(): string
     {
-        return $this->projectData->title();
+        return $this->projectData->dirName();
     }
 
     public function table(Table $table): Table
     {
+        $settings = app(SettingsService::class)->loadSettings();
+
         return $table
             ->records(fn () => $this->workspaces)
             ->columns([
@@ -85,7 +93,24 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                 // ...
             ])
             ->recordActions([
-                // ...
+                ActionGroup::make([
+                    Action::make('open_terminal')
+                        ->hidden(empty($settings->command_launch_terminal))
+                        ->action(function (array $record) {
+                            $workspaceData = WorkspaceData::from($record);
+
+                            static::resultNotificationOperation(
+                                callback: function () use ($workspaceData) {
+                                    app(LaunchService::class)->launchTerminal($this->projectData, $workspaceData);
+                                },
+                                successTitle: 'Terminal launched',
+                                failureBody: fn (Throwable $th) => $th->getMessage(),
+                            );
+                        }),
+                ])
+                    ->button()
+                    ->label('Open')
+                    ->color('info'),
             ])
             ->toolbarActions([
                 // ...

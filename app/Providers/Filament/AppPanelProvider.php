@@ -47,7 +47,7 @@ class AppPanelProvider extends PanelProvider
                     ->icon(Heroicon::RocketLaunch),
             ])
             ->navigationItems(
-                $projects->map(fn (ProjectData $project) => NavigationItem::make($project->title())
+                $projects->map(fn (ProjectData $project) => NavigationItem::make($project->dirName())
                     ->group(\App\Enums\NavigationGroup::PROJECTS->value)
                     ->url('/projects/'.$project->uuid)
                 )->all()

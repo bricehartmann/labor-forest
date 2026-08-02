@@ -11,7 +11,7 @@ class ProjectData extends Data
         public string $path,
     ) {}
 
-    public function title(): string
+    public function dirName(): string
     {
         return str($this->path)->afterLast(DIRECTORY_SEPARATOR)->toString();
     }

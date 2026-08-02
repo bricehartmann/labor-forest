@@ -10,16 +10,6 @@ use Illuminate\Translation\PotentiallyTranslatedString;
 final class ValidVariables implements ValidationRule
 {
     /**
-     * Matches a well-formed placeholder and captures its inner text.
-     */
-    private const string PLACEHOLDER = '/\{\{(.*?)\}\}/s';
-
-    /**
-     * Matches a dynamic environment variable passthrough, i.e. ENV_APP_URL.
-     */
-    private const string ENV_VARIABLE = '/^ENV_[A-Z][A-Z0-9_]*$/';
-
-    /**
      * Run the validation rule.
      *
      * @param  Closure(string, ?string=): PotentiallyTranslatedString  $fail
@@ -33,7 +23,7 @@ final class ValidVariables implements ValidationRule
         $unknownVariables = [];
 
         $remainder = preg_replace_callback(
-            self::PLACEHOLDER,
+            Variable::PLACEHOLDER,
             function (array $matches) use (&$unknownVariables): string {
                 $name = trim($matches[1]);
 
@@ -64,6 +54,6 @@ final class ValidVariables implements ValidationRule
     private function isRecognizedVariable(string $name): bool
     {
         return Variable::tryFrom($name) !== null
-            || preg_match(self::ENV_VARIABLE, $name) === 1;
+            || Variable::isEnvName($name);
     }
 }

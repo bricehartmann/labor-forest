@@ -15,4 +15,9 @@ class WorkspaceData extends Data
         #[WithCast(EnumCast::class)]
         public WorkspaceStatus $status,
     ) {}
+
+    public function dirName(): string
+    {
+        return str($this->path)->afterLast(DIRECTORY_SEPARATOR)->toString();
+    }
 }
