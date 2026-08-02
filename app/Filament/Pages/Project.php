@@ -3,12 +3,12 @@
 namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Data\ProjectData;
 use App\Exceptions\InvalidProjectsFile;
-use App\Exceptions\ProjectNotFound;
 use App\Services\ProjectsService;
-use BackedEnum;
+use Exception;
 use Filament\Pages\Page;
-use Filament\Support\Icons\Heroicon;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 
 class Project extends Page
@@ -24,7 +24,11 @@ class Project extends Page
 
     protected string $view = 'filament.pages.project';
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::RocketLaunch;
+    #[Computed]
+    public function projectData(): ProjectData
+    {
+        return ProjectData::from($this->project);
+    }
 
     public function mount(string $uuid): void
     {
@@ -32,7 +36,7 @@ class Project extends Page
             $this->project = app(ProjectsService::class)->loadProject($uuid)->toArray();
         } catch (InvalidProjectsFile $e) {
             $this->loadedInvalidMessage = $e->messagesAsString();
-        } catch (ProjectNotFound $e) {
+        } catch (Exception $e) {
             $this->loadedInvalidMessage = $e->getMessage();
         }
     }
@@ -43,5 +47,10 @@ class Project extends Page
     public static function getSlug($panel = null): string
     {
         return '/projects/{uuid}';
+    }
+
+    public function getHeading(): string
+    {
+        return $this->projectData->title();
     }
 }

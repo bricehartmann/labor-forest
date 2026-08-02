@@ -25,7 +25,94 @@ class ProjectsService
 {
     use ManagesFiles;
 
-    public function initializeProjectDirectory(string $path): void
+    /**
+     * @throws InvalidProjectsFile
+     * @throws ProjectDirectoryExists
+     * @throws ProjectDirectoryNotFound
+     * @throws ProjectDirectoryNotGitRepository
+     */
+    public function addProject(string $path): ProjectData
+    {
+        if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
+            throw new ProjectDirectoryNotFound($$path);
+        }
+
+        $projects = $this->loadProjects();
+
+        if ($projects->contains('path', $path)) {
+            throw new ProjectDirectoryExists($path);
+        }
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($path.DIRECTORY_SEPARATOR.'.git')) {
+            throw new ProjectDirectoryNotGitRepository($path);
+        }
+
+        $newProject = new ProjectData(
+            uuid: Str::uuid()->toString(),
+            path: $path,
+        );
+
+        $projects->push($newProject);
+
+        $this->ensureBaseDirectoryExists();
+        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
+        $this->initializeProjectBaseDirectory($path);
+
+        return $newProject;
+    }
+
+    /**
+     * @throws InvalidProjectsFile
+     * @throws ProjectNotFound
+     * @throws ProjectDirectoryNotFound
+     */
+    public function loadProject(string $uuid): ProjectData
+    {
+        $project = $this->loadProjects()->firstWhere('uuid', $uuid);
+
+        if (! $project) {
+            throw new ProjectNotFound($uuid);
+        }
+
+        $this->initializeProjectBaseDirectory($project->path);
+
+        return $project;
+    }
+
+    /**
+     * @return Collection<int, ProjectData>
+     *
+     * @throws InvalidProjectsFile when the file is unparseable, malformed, or fails validation
+     */
+    public function loadProjects(): Collection
+    {
+        $this->ensureDirectoryExists($this->makeRelativeBasePath(), Disk::USER_HOME->value);
+        $this->ensureBaseFileExists(File::PROJECTS->value);
+
+        $path = $this->makeRelativeBasePath(File::PROJECTS->value);
+
+        try {
+            $yaml = Yaml::parse($this->getBaseFile(File::PROJECTS->value));
+        } catch (ParseException $e) {
+            throw InvalidProjectsFile::fromParseError($path, $e);
+        }
+
+        if ($yaml === null) {
+            return new Collection;
+        }
+
+        if (! is_array($yaml)) {
+            throw InvalidProjectsFile::notAList($path, get_debug_type($yaml));
+        }
+
+        if (! array_is_list($yaml)) {
+            throw InvalidProjectsFile::notAList($path, 'a mapping');
+        }
+
+        return $this->makeProjects($path, $yaml);
+    }
+
+    protected function initializeProjectBaseDirectory(string $path): void
     {
         if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
             throw new ProjectDirectoryNotFound($path);
@@ -85,90 +172,6 @@ class ProjectsService
                 $workflowDown->toArray(),
             ], inline: 10));
         }
-    }
-
-    /**
-     * @throws InvalidProjectsFile
-     * @throws ProjectDirectoryExists
-     * @throws ProjectDirectoryNotFound
-     * @throws ProjectDirectoryNotGitRepository
-     */
-    public function addProject(string $path): ProjectData
-    {
-        if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
-            throw new ProjectDirectoryNotFound($$path);
-        }
-
-        $projects = $this->loadProjects();
-
-        if ($projects->contains('path', $path)) {
-            throw new ProjectDirectoryExists($path);
-        }
-
-        if (! \Illuminate\Support\Facades\File::isDirectory($path.DIRECTORY_SEPARATOR.'.git')) {
-            throw new ProjectDirectoryNotGitRepository($path);
-        }
-
-        $newProject = new ProjectData(
-            uuid: Str::uuid()->toString(),
-            path: $path,
-        );
-
-        $projects->push($newProject);
-
-        $this->ensureBaseDirectoryExists();
-        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
-        $this->initializeProjectDirectory($path);
-
-        return $newProject;
-    }
-
-    /**
-     * @throws InvalidProjectsFile
-     * @throws ProjectNotFound
-     */
-    public function loadProject(string $uuid): ProjectData
-    {
-        $project = $this->loadProjects()->firstWhere('uuid', $uuid);
-
-        if (! $project) {
-            throw new ProjectNotFound($uuid);
-        }
-
-        return $project;
-    }
-
-    /**
-     * @return Collection<int, ProjectData>
-     *
-     * @throws InvalidProjectsFile when the file is unparseable, malformed, or fails validation
-     */
-    public function loadProjects(): Collection
-    {
-        $this->ensureDirectoryExists($this->makeRelativeBasePath(), Disk::USER_HOME->value);
-        $this->ensureBaseFileExists(File::PROJECTS->value);
-
-        $path = $this->makeRelativeBasePath(File::PROJECTS->value);
-
-        try {
-            $yaml = Yaml::parse($this->getBaseFile(File::PROJECTS->value));
-        } catch (ParseException $e) {
-            throw InvalidProjectsFile::fromParseError($path, $e);
-        }
-
-        if ($yaml === null) {
-            return new Collection;
-        }
-
-        if (! is_array($yaml)) {
-            throw InvalidProjectsFile::notAList($path, get_debug_type($yaml));
-        }
-
-        if (! array_is_list($yaml)) {
-            throw InvalidProjectsFile::notAList($path, 'a mapping');
-        }
-
-        return $this->makeProjects($path, $yaml);
     }
 
     /**
