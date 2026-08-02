@@ -10,6 +10,7 @@ use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\ProjectDirectoryExists;
 use App\Exceptions\ProjectDirectoryNotFound;
 use App\Exceptions\ProjectDirectoryNotGitRepository;
+use App\Exceptions\ProjectNotFound;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -53,6 +54,21 @@ class ProjectsService
         $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray()));
 
         return $newProject;
+    }
+
+    /**
+     * @throws InvalidProjectsFile
+     * @throws ProjectNotFound
+     */
+    public function loadProject(string $uuid): ProjectData
+    {
+        $project = $this->loadProjects()->firstWhere('uuid', $uuid);
+
+        if (! $project) {
+            throw new ProjectNotFound($uuid);
+        }
+
+        return $project;
     }
 
     /**

@@ -21,6 +21,7 @@ use Filament\Support\Enums\Alignment;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\HtmlString;
+use Livewire\Attributes\Locked;
 
 class Settings extends Page
 {
@@ -28,6 +29,7 @@ class Settings extends Page
 
     public ?array $data = [];
 
+    #[Locked]
     public ?string $loadedInvalidMessage = null;
 
     protected string $view = 'filament.pages.settings';

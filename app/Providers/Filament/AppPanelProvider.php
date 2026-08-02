@@ -2,8 +2,11 @@
 
 namespace App\Providers\Filament;
 
+use App\Data\ProjectData;
+use App\Services\ProjectsService;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationItem;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -19,6 +22,8 @@ class AppPanelProvider extends PanelProvider
 {
     public function panel(Panel $panel): Panel
     {
+        $projects = rescue(fn () => app(ProjectsService::class)->loadProjects(), collect());
+
         return $panel
             ->default()
             ->id('app')
@@ -34,6 +39,12 @@ class AppPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
             ])
+            ->navigationItems(
+                $projects->map(fn (ProjectData $project) => NavigationItem::make($project->title())
+                    ->group('Projects')
+                    ->url('/projects/'.$project->uuid)
+                )->all()
+            )
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->widgets([
             ])

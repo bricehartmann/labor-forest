@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Filament\Pages\Project;
 use App\Services\ProjectsService;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
@@ -38,7 +39,9 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
 
                 static::resultNotificationOperation(
                     callback: function () use ($path) {
-                        app(ProjectsService::class)->addProject($path);
+                        $project = app(ProjectsService::class)->addProject($path);
+
+                        $this->redirect(Project::getUrl(['uuid' => $project->uuid]));
                     },
                     successTitle: 'Project added',
                     failureBody: fn (Throwable $th) => $th->getMessage(),

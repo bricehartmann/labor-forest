@@ -13,7 +13,7 @@ class ProjectData extends Data
 
     public function title(): string
     {
-        return str($this->path)->afterLast(DIRECTORY_SEPARATOR)->replace(['-', '_'], ' ')->ucWords()->toString();
+        return str($this->path)->afterLast(DIRECTORY_SEPARATOR)->toString();
     }
 
     public static function rules(): array
