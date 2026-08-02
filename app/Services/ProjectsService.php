@@ -4,8 +4,12 @@ namespace App\Services;
 
 use App\Concerns\Services\ManagesFiles;
 use App\Data\ProjectData;
+use App\Data\WorkflowData;
+use App\Data\WorkflowStepData;
+use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
+use App\Enums\WorkflowStepType;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\ProjectDirectoryExists;
 use App\Exceptions\ProjectDirectoryNotFound;
@@ -20,6 +24,68 @@ use Symfony\Component\Yaml\Yaml;
 class ProjectsService
 {
     use ManagesFiles;
+
+    public function initializeProjectDirectory(string $path): void
+    {
+        if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
+            throw new ProjectDirectoryNotFound($path);
+        }
+
+        $pathBaseDir = $path.DIRECTORY_SEPARATOR.Directory::BASE->value;
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($pathBaseDir)) {
+            \Illuminate\Support\Facades\File::makeDirectory($pathBaseDir);
+        }
+
+        $pathIgnoredDir = $pathBaseDir.DIRECTORY_SEPARATOR.Directory::IGNORED->value;
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($pathIgnoredDir)) {
+            \Illuminate\Support\Facades\File::makeDirectory($pathIgnoredDir);
+        }
+
+        $pathGitIgnore = $pathIgnoredDir.DIRECTORY_SEPARATOR.'.gitignore';
+
+        if (! \Illuminate\Support\Facades\File::isFile($pathGitIgnore)) {
+            \Illuminate\Support\Facades\File::put($pathGitIgnore, 'ignored/');
+        }
+
+        $pathWorkflowsDir = $pathBaseDir.DIRECTORY_SEPARATOR.Directory::WORKFLOWS->value;
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($pathWorkflowsDir)) {
+            \Illuminate\Support\Facades\File::makeDirectory($pathWorkflowsDir);
+        }
+
+        $pathWorkflowUp = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_UP->value;
+
+        if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowUp)) {
+            $stepCopyEnv = new WorkflowStepData(
+                name: 'Copy .env file from primary project directory',
+                type: WorkflowStepType::SHELL,
+                run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env',
+            );
+            $workflowUp = new WorkflowData(
+                sort_order: 0,
+                steps: collect([$stepCopyEnv]),
+            );
+
+            \Illuminate\Support\Facades\File::put($pathWorkflowUp, Yaml::dump([
+                $workflowUp->toArray(),
+            ]));
+        }
+
+        $pathWorkflowDown = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_DOWN->value;
+
+        if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowDown)) {
+            $workflowDown = new WorkflowData(
+                sort_order: 100,
+                steps: collect(),
+            );
+
+            \Illuminate\Support\Facades\File::put($pathWorkflowDown, Yaml::dump([
+                $workflowDown->toArray(),
+            ]));
+        }
+    }
 
     /**
      * @throws InvalidProjectsFile
@@ -52,6 +118,7 @@ class ProjectsService
 
         $this->ensureBaseDirectoryExists();
         $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray()));
+        $this->initializeProjectDirectory($path);
 
         return $newProject;
     }
