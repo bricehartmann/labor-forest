@@ -10,10 +10,11 @@ use App\Rules\ValidVariables;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions\Action;
-use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Flex;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -52,12 +53,20 @@ class Settings extends Page
     {
         return $schema
             ->components([
-                Section::make('Notifications')
-                    ->description('Choose if you would like to be notified when a workflow run concludes.')
-                    ->schema([
-                        Checkbox::make('desktop_notifications')
-                            ->label('Enable desktop notifications'),
-                    ]),
+                Flex::make([
+                    Section::make('Notifications')
+                        ->description('Choose if you would like to be notified when a workflow run concludes.')
+                        ->schema([
+                            Toggle::make('desktop_notifications')
+                                ->label('Enable desktop notifications'),
+                        ]),
+                    Section::make('Dark mode')
+                        ->description('Choose if you would like to use the dark theme.')
+                        ->schema([
+                            Toggle::make('dark_mode')
+                                ->label('Enable dark mode'),
+                        ]),
+                ]),
                 Section::make('Launch commands')
                     ->description(new HtmlString('Commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Each command can be overridden at the project level.'))
                     ->schema([
@@ -73,7 +82,7 @@ class Settings extends Page
                                     ->button()
                                     ->modal()
                                     ->modalWidth(Width::Medium)
-                                    ->modalHeading('Example command')
+                                    ->modalHeading('Example command to launch iTerm2')
                                     ->modalDescription(new HtmlString('<code>open "{{ WORKSPACE_DIR }}" -a iterm</code>'))
                                     ->modalSubmitActionLabel('Use example')
                                     ->modalCancelActionLabel('Close')
@@ -92,7 +101,7 @@ class Settings extends Page
                                     ->button()
                                     ->modal()
                                     ->modalWidth(Width::Medium)
-                                    ->modalHeading('Example command')
+                                    ->modalHeading('Example command to launch PhpStorm')
                                     ->modalDescription(new HtmlString('<code>open "{{ WORKSPACE_DIR }}" -a phpstorm</code>'))
                                     ->modalSubmitActionLabel('Use example')
                                     ->modalCancelActionLabel('Close')
@@ -111,7 +120,7 @@ class Settings extends Page
                                     ->button()
                                     ->modal()
                                     ->modalWidth(Width::Medium)
-                                    ->modalHeading('Example command')
+                                    ->modalHeading('Example command to launch the default browser')
                                     ->modalDescription(new HtmlString('<code>open "{{ ENV_APP_URL }}"</code>'))
                                     ->modalSubmitActionLabel('Use example')
                                     ->modalCancelActionLabel('Close')
@@ -139,5 +148,22 @@ class Settings extends Page
             callback: fn () => app(SettingsService::class)->saveSettings(SettingsData::from($data)),
             successTitle: 'Settings saved',
         );
+
+        $this->applyTheme((bool) ($data['dark_mode'] ?? false));
+    }
+
+    /**
+     * Flip the theme on the current page, since the panel only reads the
+     * setting when a request boots.
+     */
+    protected function applyTheme(bool $darkMode): void
+    {
+        $theme = $darkMode ? 'dark' : 'light';
+
+        $this->js(<<<JS
+            window.dispatchEvent(new CustomEvent('theme-changed', {
+                detail: '$theme',
+            }))
+        JS);
     }
 }

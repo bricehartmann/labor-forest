@@ -19,7 +19,7 @@ class GitWorktreeService
             ->getOutput();
 
         return collect(explode("\n\n", trim($output)))
-            ->map(fn (string $record) => $this->parseRecord($record))
+            ->map(fn (string $record, int $key) => $this->parseRecord($record, $key))
             ->filter()
             ->values();
     }
@@ -27,7 +27,7 @@ class GitWorktreeService
     /**
      * Bare worktrees have no working tree to open, so they are excluded.
      */
-    private function parseRecord(string $record): ?WorktreeData
+    private function parseRecord(string $record, int $key): ?WorktreeData
     {
         $fields = $this->parseFields($record);
 
@@ -36,6 +36,7 @@ class GitWorktreeService
         }
 
         return new WorktreeData(
+            is_primary: $key === 0,
             path: $fields['worktree'],
             branch: Str::after($fields['branch'] ?? '', 'refs/heads/') ?: null,
             sha: $fields['HEAD'] ?? null,

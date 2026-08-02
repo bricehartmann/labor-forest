@@ -8,6 +8,7 @@ use Spatie\LaravelData\Data;
 class SettingsData extends Data
 {
     public function __construct(
+        public bool $dark_mode = true,
         public bool $desktop_notifications = true,
         public ?string $command_launch_ide = null,
         public ?string $command_launch_browser = null,
@@ -17,6 +18,10 @@ class SettingsData extends Data
     public static function rules(): array
     {
         return [
+            'dark_mode' => [
+                'required',
+                'boolean',
+            ],
             'desktop_notifications' => [
                 'required',
                 'boolean',

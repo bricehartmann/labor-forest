@@ -28,6 +28,7 @@ use Filament\Support\Enums\Alignment;
 use Filament\Support\Enums\TextSize;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -101,7 +102,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->color('danger')
             ->requiresConfirmation()
             ->modalHeading('Remove project')
-            ->modalDescription(new HtmlString('Are you sure you want to remove this project?<br/><br/>This action will not remove the <code>'.Directory::BASE->value.'</code> directory.'))
+            ->modalDescription(new HtmlString('Are you sure you want to remove this project?<br/><br/>This action will not remove the <code class="text-red-600">'.Directory::BASE->value.'</code> directory.'))
             ->modalSubmitActionLabel('Remove')
             ->modalCancelActionLabel('Cancel')
             ->modalFooterActionsAlignment(Alignment::End)
@@ -190,7 +191,12 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         return $table
             ->records(fn () => $this->workspaces)
             ->columns([
-                TextColumn::make('branch'),
+                IconColumn::make('is_primary')
+                    ->label('Primary')
+                    ->alignCenter()
+                    ->boolean(),
+                TextColumn::make('branch')
+                    ->grow(),
                 TextColumn::make('status')
                     ->badge()
                     ->size(TextSize::Large)

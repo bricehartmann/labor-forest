@@ -10,6 +10,7 @@ use Spatie\LaravelData\Data;
 class WorkspaceData extends Data
 {
     public function __construct(
+        public bool $is_primary,
         public string $path,
         public string $branch,
         #[WithCast(EnumCast::class)]

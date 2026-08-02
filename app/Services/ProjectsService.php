@@ -107,6 +107,7 @@ class ProjectsService
             $status = $this->loadProjectWorkspaceStatus($worktree->path);
 
             $workspaceData = new WorkspaceData(
+                is_primary: $worktree->is_primary,
                 path: $worktree->path,
                 branch: $worktree->branch,
                 status: $status,

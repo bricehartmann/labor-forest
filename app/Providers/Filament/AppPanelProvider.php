@@ -3,7 +3,9 @@
 namespace App\Providers\Filament;
 
 use App\Data\ProjectData;
+use App\Data\SettingsData;
 use App\Services\ProjectsService;
+use App\Services\SettingsService;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationGroup;
@@ -25,6 +27,7 @@ class AppPanelProvider extends PanelProvider
     public function panel(Panel $panel): Panel
     {
         $projects = rescue(fn () => app(ProjectsService::class)->loadProjects(), collect());
+        $settings = rescue(fn () => app(SettingsService::class)->loadSettings(), new SettingsData);
 
         return $panel
             ->default()
@@ -32,7 +35,11 @@ class AppPanelProvider extends PanelProvider
             ->brandName('🌲 LaborForest')
             ->path('')
             ->viteTheme('resources/css/filament/app/theme.css')
-            ->darkMode(false)
+            ->when(
+                value: $settings->dark_mode,
+                callback: fn (Panel $p) => $p->darkMode(isForced: true),
+                default: fn (Panel $p) => $p->darkMode(false),
+            )
             ->colors([
                 'primary' => Color::Zinc,
             ])
