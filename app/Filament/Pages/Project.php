@@ -297,6 +297,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             );
                         }),
                     Action::make('remove')
+                        ->hidden(fn ($record) => $record['is_primary'])
                         ->label('Remove')
                         ->icon(Heroicon::Trash)
                         ->modal()
