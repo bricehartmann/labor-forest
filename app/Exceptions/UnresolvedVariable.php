@@ -4,7 +4,7 @@ namespace App\Exceptions;
 
 use Exception;
 
-final class UnresolvedVariable extends Exception
+class UnresolvedVariable extends Exception
 {
     /**
      * The placeholder is neither an enumerated variable nor an environment passthrough.

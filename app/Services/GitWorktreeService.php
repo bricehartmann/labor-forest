@@ -2,13 +2,48 @@
 
 namespace App\Services;
 
+use App\Data\ProjectData;
+use App\Data\WorkspaceData;
 use App\Data\WorktreeData;
+use App\Exceptions\GitOperationFailed;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
 class GitWorktreeService
 {
+    public function removeWorktree(
+        ProjectData $projectData,
+        WorkspaceData $workspaceData,
+        bool $force,
+        bool $deleteBranch,
+        bool $forceDeleteBranch,
+    ): void {
+        if ($force) {
+            $process = Process::fromShellCommandline('git worktree remove --force '.$workspaceData->path, $workspaceData->path);
+        } else {
+            $process = Process::fromShellCommandline('git worktree remove '.$workspaceData->path, $workspaceData->path);
+        }
+
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new GitOperationFailed('remove worktree', $process->getErrorOutput());
+        }
+
+        if ($deleteBranch && $forceDeleteBranch) {
+            $process = Process::fromShellCommandline('git branch -D '.$workspaceData->branch, $projectData->path);
+        } else {
+            $process = Process::fromShellCommandline('git branch -d '.$workspaceData->branch, $projectData->path);
+        }
+
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new GitOperationFailed('delete branch', $process->getErrorOutput());
+        }
+    }
+
     /**
      * @return Collection<int, WorktreeData>
      */

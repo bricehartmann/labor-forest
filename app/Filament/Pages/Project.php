@@ -10,6 +10,7 @@ use App\Enums\Variable;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidProjectsFile;
 use App\Rules\ValidVariables;
+use App\Services\GitWorktreeService;
 use App\Services\LaunchService;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
@@ -18,10 +19,13 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Alignment;
@@ -260,6 +264,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                 ActionGroup::make([
                     Action::make('override_status')
                         ->label('Override status')
+                        ->icon(Heroicon::CheckCircle)
                         ->modal()
                         ->modalWidth(Width::Small)
                         ->modalHeading('Override Status')
@@ -288,6 +293,49 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                     $this->resetTable();
                                 },
                                 successTitle: 'Status overridden',
+                                failureBody: fn (Throwable $th) => $th->getMessage(),
+                            );
+                        }),
+                    Action::make('remove')
+                        ->label('Remove')
+                        ->icon(Heroicon::Trash)
+                        ->modal()
+                        ->modalWidth(Width::Small)
+                        ->modalHeading('Remove Workspace')
+                        ->modalDescription('Select how you want to remove this workspace.')
+                        ->modalSubmitActionLabel('Remove')
+                        ->modalCancelActionLabel('Cancel')
+                        ->modalFooterActionsAlignment(Alignment::End)
+                        ->schema([
+                            Checkbox::make('force_delete_worktree')
+                                ->label('Force worktree removal'),
+                            Checkbox::make('delete_branch')
+                                ->label('Delete branch')
+                                ->live()
+                                ->afterStateUpdated(function (Set $set, $state) {
+                                    if (! $state) {
+                                        $set('force_delete_branch', false);
+                                    }
+                                }),
+                            Checkbox::make('force_delete_branch')
+                                ->label('Force delete branch')
+                                ->disabled(fn (Get $get) => ! $get('delete_branch')),
+                        ])
+                        ->action(function (array $record, array $data) {
+                            static::resultNotificationOperation(
+                                callback: function () use ($record, $data) {
+                                    app(GitWorktreeService::class)->removeWorktree(
+                                        projectData: $this->projectData,
+                                        workspaceData: WorkspaceData::from($record),
+                                        force: $data['force_delete_worktree'] ?? false,
+                                        deleteBranch: $data['delete_branch'] ?? false,
+                                        forceDeleteBranch: $data['force_delete_branch'] ?? false,
+                                    );
+
+                                    $this->loadProjectData($this->projectData->uuid);
+                                    $this->resetTable();
+                                },
+                                successTitle: 'Workspace removed',
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
                             );
                         }),

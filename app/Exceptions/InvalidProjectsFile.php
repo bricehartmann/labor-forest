@@ -2,7 +2,7 @@
 
 namespace App\Exceptions;
 
-final class InvalidProjectsFile extends InvalidYamlFile
+class InvalidProjectsFile extends InvalidYamlFile
 {
     protected static function label(): string
     {
