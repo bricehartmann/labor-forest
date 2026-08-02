@@ -29,6 +29,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\HtmlString;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Throwable;
@@ -98,7 +99,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->button()
             ->modal()
             ->modalHeading('Edit Launch Commands')
-            ->modalDescription('Specify the commands that are run to launch an application with a specific workspace\'s directory or local site. Leave fields blank to use the global defaults.')
+            ->modalDescription(new HtmlString('Specify the commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Leave fields blank to use the global defaults.'))
             ->modalSubmitActionLabel('Save')
             ->modalCancelActionLabel('Cancel')
             ->modalFooterActionsAlignment(Alignment::End)

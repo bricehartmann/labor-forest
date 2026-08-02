@@ -59,7 +59,7 @@ class Settings extends Page
                             ->label('Enable desktop notifications'),
                     ]),
                 Section::make('Launch commands')
-                    ->description('Commands that are run to launch an application with a specific workspace\'s directory or local site.')
+                    ->description(new HtmlString('Commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Each command can be overridden at the project level.'))
                     ->schema([
                         TextInput::make('command_launch_terminal')
                             ->label('Launch terminal command')
@@ -81,8 +81,8 @@ class Settings extends Page
                                     ->action(fn (Set $set) => $set('command_launch_terminal', 'open "{{ WORKSPACE_DIR }}" -a iterm')),
                             ]),
                         TextInput::make('command_launch_ide')
-                            ->label('Default launch IDE command')
-                            ->helperText('The command to run to launch a workspace directory in an IDE. Can be changed at the project level.')
+                            ->label('Launch IDE command')
+                            ->helperText('The command to run to launch a workspace directory in an IDE.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm')
                             ->nullable()
                             ->rules([new ValidVariables])
@@ -100,8 +100,8 @@ class Settings extends Page
                                     ->action(fn (Set $set) => $set('command_launch_ide', 'open "{{ WORKSPACE_DIR }}" -a phpstorm')),
                             ]),
                         TextInput::make('command_launch_browser')
-                            ->label('Default launch browser command')
-                            ->helperText('The command to run to launch a browser for a specific workspace\'s local site. Can be changed at the project level.')
+                            ->label('Launch browser command')
+                            ->helperText('The command to run to launch a browser for a specific workspace\'s local site.')
                             ->placeholder('open "{{ ENV_APP_URL }}"')
                             ->nullable()
                             ->rules([new ValidVariables])
