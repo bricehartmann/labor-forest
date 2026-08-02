@@ -60,9 +60,6 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         }
     }
 
-    /**
-     * @return string|null
-     */
     public static function getSlug($panel = null): string
     {
         return '/projects/{uuid}';
@@ -92,6 +89,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ])
             ->toolbarActions([
                 // ...
-            ]);
+            ])
+            ->paginated(false);
     }
 }

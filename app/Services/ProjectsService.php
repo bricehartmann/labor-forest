@@ -182,6 +182,13 @@ class ProjectsService
             \Illuminate\Support\Facades\File::put($pathGitIgnore, '*'.PHP_EOL.'!'.File::GIT_IGNORE->value.PHP_EOL);
         }
 
+        $pathStatus = $pathIgnoredDir.DIRECTORY_SEPARATOR.File::STATUS->value;
+
+        if (! \Illuminate\Support\Facades\File::isFile($pathStatus)) {
+            $statusData = new WorkspaceStatusData(WorkspaceStatus::SUSPENDED);
+            \Illuminate\Support\Facades\File::put($pathStatus, Yaml::dump($statusData->toArray()));
+        }
+
         $pathWorkflowsDir = $pathBaseDir.DIRECTORY_SEPARATOR.Directory::WORKFLOWS->value;
 
         if (! \Illuminate\Support\Facades\File::isDirectory($pathWorkflowsDir)) {
