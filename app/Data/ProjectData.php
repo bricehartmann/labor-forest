@@ -3,6 +3,7 @@
 namespace App\Data;
 
 use App\Rules\ValidVariables;
+use Illuminate\Support\Str;
 use Spatie\LaravelData\Data;
 
 class ProjectData extends Data
@@ -18,6 +19,21 @@ class ProjectData extends Data
     public function dirName(): string
     {
         return str($this->path)->afterLast(DIRECTORY_SEPARATOR)->toString();
+    }
+
+    public function parentDir(): string
+    {
+        return dirname($this->path);
+    }
+
+    public function slugKebab(): string
+    {
+        return Str::slug($this->dirName());
+    }
+
+    public function slugSnake(): string
+    {
+        return Str::slug($this->dirName(), '_');
     }
 
     public static function rules(): array

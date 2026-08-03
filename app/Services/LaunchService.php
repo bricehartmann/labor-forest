@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Data\ProjectData;
 use App\Data\WorkspaceData;
+use Symfony\Component\Process\Process;
 
 class LaunchService
 {
@@ -40,10 +41,12 @@ class LaunchService
             return;
         }
 
-        shell_exec(app(VariableReplacementService::class)->replace(
+        $process = Process::fromShellCommandline(app(VariableReplacementService::class)->replace(
             projectData: $projectData,
             workspaceData: $workspaceData,
             content: $command,
-        ));
+        ), $workspaceData->path);
+        $process->setOptions(['create_new_console' => true]);
+        $process->start();
     }
 }

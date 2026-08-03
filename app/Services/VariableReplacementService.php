@@ -8,7 +8,6 @@ use App\Enums\Variable;
 use App\Exceptions\UnresolvedVariable;
 use Dotenv\Dotenv;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Str;
 
 class VariableReplacementService
 {
@@ -21,11 +20,11 @@ class VariableReplacementService
     {
         $replacers = [
             Variable::PROJECT_PRIMARY_DIR->value => $projectData->path,
-            Variable::PROJECT_SLUG_KEBAB->value => Str::slug($projectData->dirName()),
-            Variable::PROJECT_SLUG_SNAKE->value => Str::slug($projectData->dirName(), '_'),
+            Variable::PROJECT_SLUG_KEBAB->value => $projectData->slugKebab(),
+            Variable::PROJECT_SLUG_SNAKE->value => $projectData->slugSnake(),
             Variable::WORKSPACE_DIR->value => $workspaceData->path,
-            Variable::WORKSPACE_SLUG_KEBAB->value => Str::slug($workspaceData->dirName()),
-            Variable::WORKSPACE_SLUG_SNAKE->value => Str::slug($workspaceData->dirName(), '_'),
+            Variable::WORKSPACE_SLUG_KEBAB->value => $workspaceData->slugKebab(),
+            Variable::WORKSPACE_SLUG_SNAKE->value => $workspaceData->slugSnake(),
             ...$this->loadEnvReplacers($workspaceData),
         ];
 
