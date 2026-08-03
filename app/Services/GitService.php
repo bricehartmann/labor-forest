@@ -20,27 +20,29 @@ class GitService
         bool $forceDeleteBranch,
     ): void {
         if ($force) {
-            $process = Process::fromShellCommandline('git worktree remove --force '.$workspaceData->path, $workspaceData->path);
+            $removeWorktreeProcess = Process::fromShellCommandline('git worktree remove --force '.$workspaceData->path, $workspaceData->path);
         } else {
-            $process = Process::fromShellCommandline('git worktree remove '.$workspaceData->path, $workspaceData->path);
+            $removeWorktreeProcess = Process::fromShellCommandline('git worktree remove '.$workspaceData->path, $workspaceData->path);
         }
 
-        $process->run();
+        $removeWorktreeProcess->run();
 
-        if (! $process->isSuccessful()) {
-            throw new GitOperationFailed('remove worktree', $process->getErrorOutput());
+        if (! $removeWorktreeProcess->isSuccessful()) {
+            throw new GitOperationFailed('remove worktree'.($force ? ' (forced)' : ''), $removeWorktreeProcess->getErrorOutput());
         }
 
         if ($deleteBranch && $forceDeleteBranch) {
-            $process = Process::fromShellCommandline('git branch --delete --force '.$workspaceData->branch, $projectData->path);
-        } else {
-            $process = Process::fromShellCommandline('git branch --delete '.$workspaceData->branch, $projectData->path);
+            $deleteBranchProcess = Process::fromShellCommandline('git branch --delete --force '.$workspaceData->branch, $projectData->path);
+        } elseif ($deleteBranch) {
+            $deleteBranchProcess = Process::fromShellCommandline('git branch --delete '.$workspaceData->branch, $projectData->path);
         }
 
-        $process->run();
+        if (isset($deleteBranchProcess)) {
+            $deleteBranchProcess->run();
 
-        if (! $process->isSuccessful()) {
-            throw new GitOperationFailed('delete branch', $process->getErrorOutput());
+            if (! $deleteBranchProcess->isSuccessful()) {
+                throw new GitOperationFailed('delete branch'.($force ? ' (forced)' : ''), $process->getErrorOutput());
+            }
         }
     }
 
