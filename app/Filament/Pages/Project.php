@@ -20,6 +20,7 @@ use Filament\Actions\ActionGroup;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\KeyValueEntry;
@@ -98,6 +99,56 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         return $this->projectData->dirName();
     }
 
+    public function addWorkspaceAction(): Action
+    {
+        return Action::make('addWorkspace')
+            ->label('Add workspace')
+            ->button()
+            ->color('success')
+            ->modal()
+            ->modalWidth(Width::Medium)
+            ->modalHeading('Add Workspace')
+            ->modalDescription('Add a new workspace using a new or existing branch.')
+            ->modalSubmitActionLabel('Add')
+            ->modalCancelActionLabel('Cancel')
+            ->modalFooterActionsAlignment(Alignment::End)
+            ->fillForm(fn () => [
+                'new_or_existing' => null,
+                'existing_branch' => null,
+                'base_branch' => rescue(fn () => app(GitService::class)->currentBranch($this->projectData->path)),
+            ])
+            ->schema([
+                Radio::make('new_or_existing')
+                    ->live()
+                    ->label('Create workspace for...')
+                    ->options([
+                        'new' => 'new branch',
+                        'existing' => 'existing branch',
+                    ])
+                    ->inline()
+                    ->required(),
+                Select::make('existing_branch')
+                    ->visible(fn (Get $get) => $get('new_or_existing') === 'existing')
+                    ->label('Branch')
+                    ->options(fn () => rescue(fn () => app(ProjectsService::class)
+                        ->listProjectLocalBranches($this->projectData->path, onlyBranchesWithoutExistingWorkspace: true)->all(), [])
+                    )
+                    ->native(false)
+                    ->searchable()
+                    ->required(),
+                Select::make('base_branch')
+                    ->visible(fn (Get $get) => $get('new_or_existing') === 'new')
+                    ->label('Base branch for new branch')
+                    ->options(fn ($state) => rescue(fn () => app(ProjectsService::class)
+                        ->listProjectLocalBranches($this->projectData->path, onlyBranchesWithoutExistingWorkspace: false)->all(), [])
+                    )
+                    ->native(false)
+                    ->searchable()
+                    ->required(),
+            ])
+            ->action(function (array $data) {});
+    }
+
     public function removeAction(): Action
     {
         return Action::make('remove')
@@ -129,6 +180,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
         return Action::make('editLaunchCommands')
             ->label('Edit launch commands')
+            ->color('info')
             ->button()
             ->modal()
             ->modalHeading('Edit Launch Commands')
@@ -260,7 +312,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                 ])
                     ->button()
                     ->label('Launch')
-                    ->color('info'),
+                    ->color('primary'),
                 ActionGroup::make([
                     Action::make('override_status')
                         ->label('Override status')

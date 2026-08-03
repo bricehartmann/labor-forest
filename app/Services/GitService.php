@@ -16,6 +16,12 @@ use Symfony\Component\Process\Process;
 
 class GitService
 {
+    /**
+     * @throws WorkspaceDirectoryExists
+     * @throws GitBranchDoesNotExist
+     * @throws RuntimeException
+     * @throws GitOperationFailed
+     */
     public function addWorktree(
         ProjectData $projectData,
         WorkspaceData $workspaceData,
@@ -43,6 +49,9 @@ class GitService
         }
     }
 
+    /**
+     * @throws GitOperationFailed
+     */
     public function removeWorktree(
         ProjectData $projectData,
         WorkspaceData $workspaceData,
@@ -67,7 +76,7 @@ class GitService
         };
 
         if ($deleteBranchCommand) {
-            $deleteBranchProcess = Process::fromShellCommandline($removeWorktreeCommand, $workspaceData->path);
+            $deleteBranchProcess = Process::fromShellCommandline($deleteBranchCommand, $projectData->path);
             $deleteBranchProcess->run();
 
             if (! $deleteBranchProcess->isSuccessful()) {
@@ -78,17 +87,56 @@ class GitService
 
     /**
      * @return Collection<int, WorktreeData>
+     *
+     * @throws GitOperationFailed
      */
     public function listWorktrees(string $projectPath): Collection
     {
-        $output = Process::fromShellCommandline('git worktree list --porcelain', $projectPath)
-            ->mustRun()
-            ->getOutput();
+        $process = Process::fromShellCommandline('git worktree list --porcelain', $projectPath);
+        $process->run();
 
-        return collect(explode("\n\n", trim($output)))
+        if (! $process->isSuccessful()) {
+            throw new GitOperationFailed('list worktrees', $process->getErrorOutput());
+        }
+
+        return collect(explode("\n\n", trim($process->getOutput())))
             ->map(fn (string $record, int $key) => $this->parseRecord($record, $key))
             ->filter()
             ->values();
+    }
+
+    /**
+     * @return Collection<int, string>
+     *
+     * @throws GitOperationFailed
+     */
+    public function listLocalBranches(string $projectPath): Collection
+    {
+        $process = Process::fromShellCommandline("git for-each-ref --format='%(refname:short)' refs/heads", $projectPath);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new GitOperationFailed('list local branches', $process->getErrorOutput());
+        }
+
+        return collect(explode("\n", trim($process->getOutput())))
+            ->filter()
+            ->values();
+    }
+
+    /**
+     * @throws GitOperationFailed
+     */
+    public function currentBranch(string $projectPath): string
+    {
+        $process = Process::fromShellCommandline('git rev-parse --abbrev-ref HEAD', $projectPath);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new GitOperationFailed('get current branch', $process->getErrorOutput());
+        }
+
+        return trim($process->getOutput());
     }
 
     /**

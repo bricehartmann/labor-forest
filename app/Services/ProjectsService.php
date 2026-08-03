@@ -28,6 +28,21 @@ class ProjectsService
 {
     use ManagesFiles;
 
+    public function listProjectLocalBranches(string $path, bool $onlyBranchesWithoutExistingWorkspace): Collection
+    {
+        $localBranches = app(GitService::class)->listLocalBranches($path);
+
+        if (! $onlyBranchesWithoutExistingWorkspace) {
+            return $localBranches;
+        }
+
+        $workspaces = $this->loadProjectWorkspaces($path);
+
+        return $localBranches
+            ->reject(fn (string $branch) => $workspaces->contains('branch', $branch))
+            ->values();
+    }
+
     public function removeProject(string $uuid): void
     {
         $this->ensureBaseDirectoryExists();

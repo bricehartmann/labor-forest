@@ -25,8 +25,8 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
     public function addProjectAction(): Action
     {
         return Action::make('addProject')
-            ->label('Select project directory')
-            ->color('primary')
+            ->label('Add project')
+            ->color('success')
             ->action(function () {
                 $path = Dialog::new()
                     ->title('Select Project Directory')
