@@ -32,9 +32,9 @@ class GitService
         }
 
         if ($deleteBranch && $forceDeleteBranch) {
-            $process = Process::fromShellCommandline('git branch -D '.$workspaceData->branch, $projectData->path);
+            $process = Process::fromShellCommandline('git branch --delete --force '.$workspaceData->branch, $projectData->path);
         } else {
-            $process = Process::fromShellCommandline('git branch -d '.$workspaceData->branch, $projectData->path);
+            $process = Process::fromShellCommandline('git branch --delete '.$workspaceData->branch, $projectData->path);
         }
 
         $process->run();
