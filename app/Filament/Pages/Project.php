@@ -480,7 +480,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
                                     $this->reloadData();
                                 },
-                                successTitle: 'Status overridden',
+                                successTitle: 'Status updated',
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
                             );
                         }),
