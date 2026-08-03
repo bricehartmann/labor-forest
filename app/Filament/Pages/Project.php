@@ -161,6 +161,8 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                 : $data['existing_branch'],
                             baseBranch: $data['base_branch'] ?? null,
                         );
+                        $this->loadProjectData($this->projectData->uuid);
+                        $this->resetTable();
                     },
                     successTitle: 'Workspace added',
                     failureBody: fn (Throwable $th) => $th->getMessage(),
@@ -352,6 +354,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             static::resultNotificationOperation(
                                 callback: function () use ($record) {
                                     app(ProjectsService::class)->initializeWorkspaceStarterWorkflows($record['path']);
+                                    $this->resetTable();
                                 },
                                 successTitle: 'Workflows created: up & down',
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
