@@ -314,13 +314,13 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->nullable()
                     ->rules([new ValidVariables]),
                 TextInput::make('command_launch_ide')
-                    ->label('Default launch IDE command')
+                    ->label('Launch IDE command')
                     ->helperText('The command to run to launch a workspace directory in an IDE.')
                     ->placeholder($settings->command_launch_ide ?? 'open "{{ WORKSPACE_DIR }}" -a phpstorm')
                     ->nullable()
                     ->rules([new ValidVariables]),
                 TextInput::make('command_launch_browser')
-                    ->label('Default launch browser command')
+                    ->label('Launch browser command')
                     ->helperText('The command to run to launch a browser for a specific workspace\'s local site.')
                     ->placeholder($settings->command_launch_browser ?? 'open "{{ ENV_APP_URL }}"')
                     ->nullable()
