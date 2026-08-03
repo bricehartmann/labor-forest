@@ -10,7 +10,7 @@ use App\Enums\Variable;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidProjectsFile;
 use App\Rules\ValidVariables;
-use App\Services\GitWorktreeService;
+use App\Services\GitService;
 use App\Services\LaunchService;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
@@ -325,7 +325,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                         ->action(function (array $record, array $data) {
                             static::resultNotificationOperation(
                                 callback: function () use ($record, $data) {
-                                    app(GitWorktreeService::class)->removeWorktree(
+                                    app(GitService::class)->removeWorktree(
                                         projectData: $this->projectData,
                                         workspaceData: WorkspaceData::from($record),
                                         force: $data['force_delete_worktree'] ?? false,

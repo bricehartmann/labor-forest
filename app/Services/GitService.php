@@ -10,7 +10,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
-class GitWorktreeService
+class GitService
 {
     public function removeWorktree(
         ProjectData $projectData,

@@ -99,7 +99,7 @@ class ProjectsService
      */
     public function loadProjectWorkspaces(string $path): Collection
     {
-        $worktrees = rescue(fn () => app(GitWorktreeService::class)->listWorktrees($path), []);
+        $worktrees = rescue(fn () => app(GitService::class)->listWorktrees($path), []);
 
         $workspaces = collect();
 
