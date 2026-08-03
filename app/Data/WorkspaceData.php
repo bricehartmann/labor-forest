@@ -2,6 +2,7 @@
 
 namespace App\Data;
 
+use App\Enums\GitStatus;
 use App\Enums\WorkspaceStatus;
 use Illuminate\Support\Str;
 use Spatie\LaravelData\Attributes\WithCast;
@@ -16,6 +17,8 @@ class WorkspaceData extends Data
         public string $branch,
         #[WithCast(EnumCast::class)]
         public WorkspaceStatus $status,
+        #[WithCast(EnumCast::class)]
+        public GitStatus $git_status,
     ) {}
 
     public function dirName(): string

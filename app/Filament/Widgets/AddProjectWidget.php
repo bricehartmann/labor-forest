@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Enums\SessionKey;
 use App\Filament\Pages\Project;
 use App\Services\ProjectsService;
 use Filament\Actions\Action;
@@ -41,9 +42,10 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
                     callback: function () use ($path) {
                         $project = app(ProjectsService::class)->addProject($path);
 
+                        session()->put(SessionKey::PROJECT_CREATED->value, $project->uuid);
+
                         $this->redirect(Project::getUrl([
                             'uuid' => $project->uuid,
-                            'created' => 1,
                         ]));
                     },
                     successTitle: 'Project added',

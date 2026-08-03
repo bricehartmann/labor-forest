@@ -12,6 +12,7 @@ use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
 use App\Enums\FileExtension;
+use App\Enums\GitStatus;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
@@ -149,6 +150,7 @@ class ProjectsService
             path: $worktreeData->path,
             branch: $worktreeData->branch,
             status: WorkspaceStatus::SUSPENDED,
+            git_status: $this->loadProjectWorkspaceGitStatus($worktreeData->path),
         );
     }
 
@@ -169,6 +171,7 @@ class ProjectsService
                 path: $worktree->path,
                 branch: $worktree->branch,
                 status: $status,
+                git_status: $this->loadProjectWorkspaceGitStatus($worktree->path),
             );
 
             $workspaces->push($workspaceData);
@@ -207,6 +210,17 @@ class ProjectsService
         $workspaceStatusData = WorkspaceStatusData::from($yaml);
 
         return $workspaceStatusData->status;
+    }
+
+    protected function loadProjectWorkspaceGitStatus(string $path): GitStatus
+    {
+        return rescue(
+            fn () => app(GitService::class)->isStatusClean($path)
+                ? GitStatus::CLEAN
+                : GitStatus::DIRTY,
+            GitStatus::UNKNOWN,
+            report: false,
+        );
     }
 
     /**

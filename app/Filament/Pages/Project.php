@@ -7,7 +7,9 @@ use App\Data\GitStatusEntryData;
 use App\Data\ProjectData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
+use App\Enums\GitStatus;
 use App\Enums\Regex;
+use App\Enums\SessionKey;
 use App\Enums\Variable;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\GitOperationFailed;
@@ -76,9 +78,28 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     {
         $this->loadProjectData($uuid);
 
-        if (request()->boolean('created') && $this->loadedInvalidMessage === null) {
+        if (session()->get(SessionKey::PROJECT_CREATED->value) !== $uuid) {
+            return;
+        }
+
+        session()->forget(SessionKey::PROJECT_CREATED->value);
+
+        if ($this->loadedInvalidMessage === null && $this->isPrimaryWorkspaceDirty()) {
             $this->mountAction('projectCreated');
         }
+    }
+
+    protected function isPrimaryWorkspaceDirty(): bool
+    {
+        $primaryWorkspace = collect($this->workspaces)->firstWhere('is_primary', true);
+
+        return ($primaryWorkspace['git_status'] ?? null) === GitStatus::DIRTY->value;
+    }
+
+    protected function reloadData(): void
+    {
+        $this->loadProjectData($this->projectData->uuid);
+        $this->resetTable();
     }
 
     protected function loadProjectData(string $uuid): void
@@ -139,8 +160,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     callback: function () use ($data) {
                         app(GitService::class)->commitAll($this->projectData->path, $data['commit_message']);
 
-                        $this->loadProjectData($this->projectData->uuid);
-                        $this->resetTable();
+                        $this->reloadData();
                     },
                     successTitle: 'Changes committed',
                     failureBody: fn (Throwable $th) => $th->getMessage(),
@@ -222,8 +242,8 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                 : $data['existing_branch'],
                             baseBranch: $data['base_branch'] ?? null,
                         );
-                        $this->loadProjectData($this->projectData->uuid);
-                        $this->resetTable();
+
+                        $this->reloadData();
                     },
                     successTitle: 'Workspace added',
                     failureBody: fn (Throwable $th) => $th->getMessage(),
@@ -324,8 +344,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
                         app(ProjectsService::class)->updateProject($projectData);
 
-                        $this->loadProjectData($this->projectData->uuid);
-                        $this->resetTable();
+                        $this->reloadData();
                     },
                     successTitle: 'Launch commands updated',
                     failureBody: fn (Throwable $th) => $th->getMessage(),
@@ -351,6 +370,11 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->badge()
                     ->size(TextSize::Large)
                     ->color(fn ($state) => WorkspaceStatus::from($state)->getColor()),
+                TextColumn::make('git_status')
+                    ->label('Git')
+                    ->badge()
+                    ->size(TextSize::Large)
+                    ->color(fn ($state) => GitStatus::from($state)->getColor()),
             ])
             ->filters([
                 // ...
@@ -415,7 +439,8 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             static::resultNotificationOperation(
                                 callback: function () use ($record) {
                                     app(ProjectsService::class)->initializeWorkspaceStarterWorkflows($record['path']);
-                                    $this->resetTable();
+
+                                    $this->reloadData();
                                 },
                                 successTitle: 'Workflows created: up & down',
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
@@ -453,8 +478,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                 callback: function () use ($record, $data) {
                                     app(ProjectsService::class)->updateProjectWorkspaceStatus($record['path'], WorkspaceStatus::from($data['status']));
 
-                                    $this->loadProjectData($this->projectData->uuid);
-                                    $this->resetTable();
+                                    $this->reloadData();
                                 },
                                 successTitle: 'Status overridden',
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
