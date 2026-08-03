@@ -16,6 +16,7 @@ use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\GitOperationFailed;
+use App\Exceptions\GitStatusNotClean;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\ProjectDirectoryExists;
 use App\Exceptions\ProjectDirectoryNotFound;
@@ -83,6 +84,8 @@ class ProjectsService
     }
 
     /**
+     * @throws GitOperationFailed
+     * @throws GitStatusNotClean
      * @throws InvalidProjectsFile
      * @throws ProjectDirectoryExists
      * @throws ProjectDirectoryNotFound
@@ -102,6 +105,10 @@ class ProjectsService
 
         if (! \Illuminate\Support\Facades\File::isDirectory($path.DIRECTORY_SEPARATOR.'.git')) {
             throw new ProjectDirectoryNotGitRepository($path);
+        }
+
+        if (! app(GitService::class)->isStatusClean($path)) {
+            throw new GitStatusNotClean($path);
         }
 
         $newProject = new ProjectData(

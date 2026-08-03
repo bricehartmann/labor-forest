@@ -41,7 +41,10 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
                     callback: function () use ($path) {
                         $project = app(ProjectsService::class)->addProject($path);
 
-                        $this->redirect(Project::getUrl(['uuid' => $project->uuid]));
+                        $this->redirect(Project::getUrl([
+                            'uuid' => $project->uuid,
+                            'created' => 1,
+                        ]));
                     },
                     successTitle: 'Project added',
                     failureBody: fn (Throwable $th) => $th->getMessage(),

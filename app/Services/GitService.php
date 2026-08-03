@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Data\GitStatusEntryData;
 use App\Data\WorktreeData;
 use App\Exceptions\GitBranchDoesNotExist;
 use App\Exceptions\GitOperationFailed;
@@ -128,6 +129,57 @@ class GitService
         return collect(explode("\n", trim($process->getOutput())))
             ->filter()
             ->values();
+    }
+
+    /**
+     * @return Collection<int, GitStatusEntryData>
+     *
+     * @throws GitOperationFailed
+     */
+    public function status(string $projectPath): Collection
+    {
+        $process = Process::fromShellCommandline('git status --porcelain', $projectPath);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new GitOperationFailed('get status', $process->getErrorOutput());
+        }
+
+        return collect(explode("\n", rtrim($process->getOutput(), "\n")))
+            ->filter(fn (string $line) => strlen($line) > 3)
+            ->map(fn (string $line) => new GitStatusEntryData(
+                code: substr($line, 0, 2),
+                path: trim(substr($line, 3)),
+            ))
+            ->values();
+    }
+
+    /**
+     * @throws GitOperationFailed
+     */
+    public function isStatusClean(string $projectPath): bool
+    {
+        return $this->status($projectPath)->isEmpty();
+    }
+
+    /**
+     * @throws GitOperationFailed
+     */
+    public function commitAll(string $projectPath, string $message): void
+    {
+        $stageProcess = Process::fromShellCommandline('git add --all', $projectPath);
+        $stageProcess->run();
+
+        if (! $stageProcess->isSuccessful()) {
+            throw new GitOperationFailed('stage all changes', $stageProcess->getErrorOutput());
+        }
+
+        $commitProcess = Process::fromShellCommandline('git commit --message '.escapeshellarg($message), $projectPath);
+        $commitProcess->run();
+
+        if (! $commitProcess->isSuccessful()) {
+            throw new GitOperationFailed('commit changes', $commitProcess->getErrorOutput() ?: $commitProcess->getOutput());
+        }
     }
 
     /**

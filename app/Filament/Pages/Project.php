@@ -3,12 +3,14 @@
 namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Data\GitStatusEntryData;
 use App\Data\ProjectData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\Regex;
 use App\Enums\Variable;
 use App\Enums\WorkspaceStatus;
+use App\Exceptions\GitOperationFailed;
 use App\Exceptions\InvalidProjectsFile;
 use App\Rules\ValidVariables;
 use App\Services\GitService;
@@ -25,6 +27,7 @@ use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\KeyValueEntry;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -72,6 +75,10 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     public function mount(string $uuid): void
     {
         $this->loadProjectData($uuid);
+
+        if (request()->boolean('created') && $this->loadedInvalidMessage === null) {
+            $this->mountAction('projectCreated');
+        }
     }
 
     protected function loadProjectData(string $uuid): void
@@ -98,6 +105,60 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     public function getHeading(): string
     {
         return $this->projectData->dirName();
+    }
+
+    public function projectCreatedAction(): Action
+    {
+        return Action::make('projectCreated')
+            ->modal()
+            ->closeModalByClickingAway(false)
+            ->closeModalByEscaping(false)
+            ->modalCloseButton(false)
+            ->modalWidth(Width::Medium)
+            ->modalIcon(Heroicon::OutlinedExclamationTriangle)
+            ->modalHeading('Repository is now dirty')
+            ->modalDescription(new HtmlString('The <code class="text-red-600">'.Directory::BASE->value.'</code> directory has been created inside this project, so the repository now has uncommitted changes.<br/><br/>You can commit them now or handle them yourself later.'))
+            ->modalSubmitActionLabel('Commit all changes')
+            ->modalCancelActionLabel('Continue without committing')
+            ->modalFooterActionsAlignment(Alignment::End)
+            ->fillForm(fn () => [
+                'commit_message' => 'initialize LaborForest',
+            ])
+            ->schema([
+                TextEntry::make('dirty_files')
+                    ->label('Untracked or modified files')
+                    ->listWithLineBreaks()
+                    ->bulleted()
+                    ->state(fn () => $this->dirtyFileDescriptions()),
+                TextInput::make('commit_message')
+                    ->label('Commit message')
+                    ->required(),
+            ])
+            ->action(function (array $data) {
+                static::resultNotificationOperation(
+                    callback: function () use ($data) {
+                        app(GitService::class)->commitAll($this->projectData->path, $data['commit_message']);
+
+                        $this->loadProjectData($this->projectData->uuid);
+                        $this->resetTable();
+                    },
+                    successTitle: 'Changes committed',
+                    failureBody: fn (Throwable $th) => $th->getMessage(),
+                );
+            });
+    }
+
+    /**
+     * @return array<int, string>
+     *
+     * @throws GitOperationFailed
+     */
+    protected function dirtyFileDescriptions(): array
+    {
+        return rescue(fn () => app(GitService::class)
+            ->status($this->projectData->path)
+            ->map(fn (GitStatusEntryData $entry) => new HtmlString('<code class="text-red-600">'.$entry->path.'</code> ('.$entry->label().')'))
+            ->all(), []);
     }
 
     public function addWorkspaceAction(): Action
