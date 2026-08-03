@@ -11,8 +11,11 @@ use App\Data\WorkspaceStatusData;
 use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
+use App\Enums\FileExtension;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
+use App\Enums\YamlResourceType;
+use App\Exceptions\GitOperationFailed;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\ProjectDirectoryExists;
 use App\Exceptions\ProjectDirectoryNotFound;
@@ -21,6 +24,7 @@ use App\Exceptions\ProjectNotFound;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\Finder\SplFileInfo;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
@@ -28,6 +32,11 @@ class ProjectsService
 {
     use ManagesFiles;
 
+    /**
+     * @return Collection<int, string>
+     *
+     * @throws GitOperationFailed
+     */
     public function listProjectLocalBranches(string $path, bool $onlyBranchesWithoutExistingWorkspace): Collection
     {
         $localBranches = app(GitService::class)->listLocalBranches($path);
@@ -70,7 +79,7 @@ class ProjectsService
         }
 
         $this->putBaseFile(File::PROJECTS->value, Yaml::dump($newProjects->toArray(), inline: 10));
-        $this->initializeProjectBaseDirectory($projectData->path);
+        $this->initializeProjectWorkspaceBaseDirectory($projectData->path);
     }
 
     /**
@@ -104,9 +113,36 @@ class ProjectsService
 
         $this->ensureBaseDirectoryExists();
         $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
-        $this->initializeProjectBaseDirectory($path);
+        $this->initializeProjectWorkspaceBaseDirectory($path);
 
         return $newProject;
+    }
+
+    public function addProjectWorkspace(
+        ProjectData $projectData,
+        string $branch,
+        ?string $baseBranch,
+    ): WorkspaceData {
+        $parentDir = $projectData->parentDir();
+        $projectDir = $projectData->dirName();
+        $branchSlug = Str::slug($branch);
+        $newWorkspacePath = $parentDir.DIRECTORY_SEPARATOR.$projectDir.'-'.$branchSlug;
+
+        $worktreeData = app(GitService::class)->addWorktree(
+            mainWorktreePath: $projectData->path,
+            newWorktreePath: $newWorkspacePath,
+            branch: $branch,
+            baseBranch: $baseBranch,
+        );
+
+        $this->initializeProjectWorkspaceBaseDirectory($worktreeData->path);
+
+        return new WorkspaceData(
+            is_primary: false,
+            path: $worktreeData->path,
+            branch: $worktreeData->branch,
+            status: WorkspaceStatus::SUSPENDED,
+        );
     }
 
     /**
@@ -143,7 +179,7 @@ class ProjectsService
             File::STATUS->value,
         ]);
 
-        $this->initializeProjectBaseDirectory($path);
+        $this->initializeProjectWorkspaceBaseDirectory($path);
         \Illuminate\Support\Facades\File::put($statusPath, Yaml::dump((new WorkspaceStatusData($workspaceStatus))->toArray(), 10));
     }
 
@@ -179,7 +215,7 @@ class ProjectsService
             throw new ProjectNotFound($uuid);
         }
 
-        $this->initializeProjectBaseDirectory($project->path);
+        $this->initializeProjectWorkspaceBaseDirectory($project->path);
 
         return $project;
     }
@@ -217,17 +253,9 @@ class ProjectsService
         return $this->makeProjects($path, $yaml);
     }
 
-    protected function initializeProjectBaseDirectory(string $path): void
+    protected function initializeProjectWorkspaceBaseDirectory(string $path): void
     {
-        if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
-            throw new ProjectDirectoryNotFound($path);
-        }
-
-        $pathBaseDir = $path.DIRECTORY_SEPARATOR.Directory::BASE->value;
-
-        if (! \Illuminate\Support\Facades\File::isDirectory($pathBaseDir)) {
-            \Illuminate\Support\Facades\File::makeDirectory($pathBaseDir);
-        }
+        $pathBaseDir = $this->ensureProjectBaseDirectoryExists($path);
 
         $pathIgnoredDir = $pathBaseDir.DIRECTORY_SEPARATOR.Directory::IGNORED->value;
 
@@ -247,6 +275,11 @@ class ProjectsService
             $statusData = new WorkspaceStatusData(WorkspaceStatus::SUSPENDED);
             \Illuminate\Support\Facades\File::put($pathStatus, Yaml::dump($statusData->toArray()));
         }
+    }
+
+    public function initializeWorkspaceStarterWorkflows(string $path): void
+    {
+        $pathBaseDir = $this->ensureProjectBaseDirectoryExists($path);
 
         $pathWorkflowsDir = $pathBaseDir.DIRECTORY_SEPARATOR.Directory::WORKFLOWS->value;
 
@@ -267,9 +300,7 @@ class ProjectsService
                 steps: collect([$stepCopyEnv]),
             );
 
-            \Illuminate\Support\Facades\File::put($pathWorkflowUp, Yaml::dump([
-                $workflowUp->toArray(),
-            ], inline: 10));
+            \Illuminate\Support\Facades\File::put($pathWorkflowUp, Yaml::dump($workflowUp->toArray(), inline: 10));
         }
 
         $pathWorkflowDown = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_DOWN->value;
@@ -280,10 +311,39 @@ class ProjectsService
                 steps: collect(),
             );
 
-            \Illuminate\Support\Facades\File::put($pathWorkflowDown, Yaml::dump([
-                $workflowDown->toArray(),
-            ], inline: 10));
+            \Illuminate\Support\Facades\File::put($pathWorkflowDown, Yaml::dump($workflowDown->toArray(), inline: 10));
         }
+    }
+
+    public function doesAnyProjectWorkspaceWorkflowExist(string $path): bool
+    {
+        $pathBaseDir = $path.DIRECTORY_SEPARATOR.Directory::BASE->value;
+        $pathWorkflowsDir = $pathBaseDir.DIRECTORY_SEPARATOR.Directory::WORKFLOWS->value;
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($pathWorkflowsDir)) {
+            return false;
+        }
+
+        return collect(\Illuminate\Support\Facades\File::files($pathWorkflowsDir))
+            ->reject(fn (SplFileInfo $file) => $file->getExtension() !== FileExtension::YAML->value)
+            ->map(fn (SplFileInfo $file) => rescue(fn () => Yaml::parseFile($file->getPathname())))
+            ->filter()
+            ->contains('resource_type', YamlResourceType::WORKFLOW->value);
+    }
+
+    protected function ensureProjectBaseDirectoryExists(string $path): string
+    {
+        if (! \Illuminate\Support\Facades\File::isDirectory($path)) {
+            throw new ProjectDirectoryNotFound($path);
+        }
+
+        $pathBaseDir = $path.DIRECTORY_SEPARATOR.Directory::BASE->value;
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($pathBaseDir)) {
+            \Illuminate\Support\Facades\File::makeDirectory($pathBaseDir);
+        }
+
+        return $pathBaseDir;
     }
 
     /**

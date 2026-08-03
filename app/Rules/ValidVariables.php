@@ -51,7 +51,7 @@ final class ValidVariables implements ValidationRule
     /**
      * Determine whether the variable name is enumerated or a valid environment passthrough.
      */
-    private function isRecognizedVariable(string $name): bool
+    protected function isRecognizedVariable(string $name): bool
     {
         return Variable::tryFrom($name) !== null
             || Variable::isEnvName($name);

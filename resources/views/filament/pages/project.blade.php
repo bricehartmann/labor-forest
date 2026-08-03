@@ -15,11 +15,11 @@
         </x-filament::callout>
     @else
         <div class="flex justify-between gap-4">
-            {{ $this->addWorkspaceAction }}
             <div class="flex gap-4">
                 {{ $this->editLaunchCommands }}
                 {{ $this->remove }}
             </div>
+            {{ $this->addWorkspaceAction }}
         </div>
 
         {{ $this->table }}

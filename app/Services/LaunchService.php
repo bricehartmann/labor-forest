@@ -35,7 +35,7 @@ class LaunchService
         );
     }
 
-    private function launch(ProjectData $projectData, WorkspaceData $workspaceData, ?string $command): void
+    protected function launch(ProjectData $projectData, WorkspaceData $workspaceData, ?string $command): void
     {
         if (! $command) {
             return;

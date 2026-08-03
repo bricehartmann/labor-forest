@@ -6,6 +6,7 @@ use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Data\ProjectData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
+use App\Enums\Regex;
 use App\Enums\Variable;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidProjectsFile;
@@ -115,6 +116,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->fillForm(fn () => [
                 'new_or_existing' => null,
                 'existing_branch' => null,
+                'new_branch' => null,
                 'base_branch' => rescue(fn () => app(GitService::class)->currentBranch($this->projectData->path)),
             ])
             ->schema([
@@ -130,23 +132,51 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                 Select::make('existing_branch')
                     ->visible(fn (Get $get) => $get('new_or_existing') === 'existing')
                     ->label('Branch')
-                    ->options(fn () => rescue(fn () => app(ProjectsService::class)
-                        ->listProjectLocalBranches($this->projectData->path, onlyBranchesWithoutExistingWorkspace: true)->all(), [])
-                    )
+                    ->options(fn () => $this->branchOptions(onlyBranchesWithoutExistingWorkspace: true))
                     ->native(false)
                     ->searchable()
                     ->required(),
+                TextInput::make('new_branch')
+                    ->visible(fn (Get $get) => $get('new_or_existing') === 'new')
+                    ->label('New branch name')
+                    ->placeholder('feature/something-awesome')
+                    ->required()
+                    ->notIn($this->branchOptions(onlyBranchesWithoutExistingWorkspace: false))
+                    ->regex(Regex::GIT_BRANCH_NAME->value),
                 Select::make('base_branch')
                     ->visible(fn (Get $get) => $get('new_or_existing') === 'new')
                     ->label('Base branch for new branch')
-                    ->options(fn ($state) => rescue(fn () => app(ProjectsService::class)
-                        ->listProjectLocalBranches($this->projectData->path, onlyBranchesWithoutExistingWorkspace: false)->all(), [])
-                    )
+                    ->options(fn () => $this->branchOptions(onlyBranchesWithoutExistingWorkspace: false))
                     ->native(false)
                     ->searchable()
                     ->required(),
             ])
-            ->action(function (array $data) {});
+            ->action(function (array $data) {
+                static::resultNotificationOperation(
+                    callback: function () use ($data) {
+                        app(ProjectsService::class)->addProjectWorkspace(
+                            projectData: $this->projectData,
+                            branch: $data['new_or_existing'] === 'new'
+                                ? $data['new_branch']
+                                : $data['existing_branch'],
+                            baseBranch: $data['base_branch'] ?? null,
+                        );
+                    },
+                    successTitle: 'Workspace added',
+                    failureBody: fn (Throwable $th) => $th->getMessage(),
+                );
+            });
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function branchOptions(bool $onlyBranchesWithoutExistingWorkspace): array
+    {
+        return rescue(fn () => app(ProjectsService::class)
+            ->listProjectLocalBranches($this->projectData->path, $onlyBranchesWithoutExistingWorkspace)
+            ->mapWithKeys(fn (string $branch) => [$branch => $branch])
+            ->all(), []);
     }
 
     public function removeAction(): Action
@@ -314,6 +344,24 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->label('Launch')
                     ->color('primary'),
                 ActionGroup::make([
+                    Action::make('create_starter_workflows')
+                        ->hidden(fn (array $record) => app(ProjectsService::class)->doesAnyProjectWorkspaceWorkflowExist($record['path']))
+                        ->label('Create starter workflows')
+                        ->icon(Heroicon::SquaresPlus)
+                        ->action(function (array $record) {
+                            static::resultNotificationOperation(
+                                callback: function () use ($record) {
+                                    app(ProjectsService::class)->initializeWorkspaceStarterWorkflows($record['path']);
+                                },
+                                successTitle: 'Workflows created: up & down',
+                                failureBody: fn (Throwable $th) => $th->getMessage(),
+                            );
+                        }),
+                ])
+                    ->button()
+                    ->label('Workflows')
+                    ->color('success'),
+                ActionGroup::make([
                     Action::make('override_status')
                         ->label('Override status')
                         ->icon(Heroicon::CheckCircle)
@@ -377,9 +425,12 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                         ->action(function (array $record, array $data) {
                             static::resultNotificationOperation(
                                 callback: function () use ($record, $data) {
+                                    $workspaceData = WorkspaceData::from($record);
+
                                     app(GitService::class)->removeWorktree(
-                                        projectData: $this->projectData,
-                                        workspaceData: WorkspaceData::from($record),
+                                        mainWorktreePath: $this->projectData->path,
+                                        worktreePath: $workspaceData->path,
+                                        branch: $workspaceData->branch,
                                         force: $data['force_delete_worktree'] ?? false,
                                         deleteBranch: $data['delete_branch'] ?? false,
                                         forceDeleteBranch: $data['force_delete_branch'] ?? false,

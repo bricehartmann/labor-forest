@@ -2,8 +2,6 @@
 
 namespace App\Services;
 
-use App\Data\ProjectData;
-use App\Data\WorkspaceData;
 use App\Data\WorktreeData;
 use App\Exceptions\GitBranchDoesNotExist;
 use App\Exceptions\GitOperationFailed;
@@ -23,46 +21,54 @@ class GitService
      * @throws GitOperationFailed
      */
     public function addWorktree(
-        ProjectData $projectData,
-        WorkspaceData $workspaceData,
+        string $mainWorktreePath,
+        string $newWorktreePath,
+        string $branch,
         ?string $baseBranch,
-    ): void {
-        if (File::exists($workspaceData->path)) {
-            throw new WorkspaceDirectoryExists($workspaceData->path);
+    ): WorktreeData {
+        if (File::exists($newWorktreePath)) {
+            throw new WorkspaceDirectoryExists($newWorktreePath);
         }
 
-        if ($this->doesBranchExist($projectData->path, $workspaceData->branch) && ! $baseBranch) {
-            $command = 'git worktree add "'.$projectData->parentDir().DIRECTORY_SEPARATOR.$workspaceData->slugKebab().'" "'.$workspaceData->branch.'"';
-        } elseif ($baseBranch && $this->doesBranchExist($projectData->path, $baseBranch)) {
-            $command = 'git worktree add -b "'.$workspaceData->branch.'" "'.$projectData->parentDir().DIRECTORY_SEPARATOR.$workspaceData->slugKebab().'" "'.$baseBranch.'"';
+        if ($this->doesBranchExist($mainWorktreePath, $branch) && ! $baseBranch) {
+            $command = 'git worktree add "'.$newWorktreePath.'" "'.$branch.'"';
+        } elseif ($baseBranch && $this->doesBranchExist($mainWorktreePath, $baseBranch)) {
+            $command = 'git worktree add -b "'.$branch.'" "'.$newWorktreePath.'" "'.$baseBranch.'"';
         } elseif ($baseBranch) {
-            throw new GitBranchDoesNotExist($projectData->path, $baseBranch);
+            throw new GitBranchDoesNotExist($mainWorktreePath, $baseBranch);
         } else {
             throw new RuntimeException('Branch must exist or base branch must be provided; mutually exclusive');
         }
 
-        $process = Process::fromShellCommandline($command, $projectData->path);
+        $process = Process::fromShellCommandline($command, $mainWorktreePath);
         $process->run();
 
         if (! $process->isSuccessful()) {
             throw new GitOperationFailed('add worktree '.($baseBranch ? '(new branch)' : '(existing branch)'), $process->getErrorOutput());
         }
+
+        return new WorktreeData(
+            is_primary: false,
+            path: $newWorktreePath,
+            branch: $branch,
+        );
     }
 
     /**
      * @throws GitOperationFailed
      */
     public function removeWorktree(
-        ProjectData $projectData,
-        WorkspaceData $workspaceData,
+        string $mainWorktreePath,
+        string $worktreePath,
+        string $branch,
         bool $force,
         bool $deleteBranch,
         bool $forceDeleteBranch,
     ): void {
         $removeWorktreeCommand = $force
-            ? 'git worktree remove --force '.$workspaceData->path
-            : 'git worktree remove '.$workspaceData->path;
-        $removeWorktreeProcess = Process::fromShellCommandline($removeWorktreeCommand, $workspaceData->path);
+            ? 'git worktree remove --force '.$worktreePath
+            : 'git worktree remove '.$worktreePath;
+        $removeWorktreeProcess = Process::fromShellCommandline($removeWorktreeCommand, $worktreePath);
         $removeWorktreeProcess->run();
 
         if (! $removeWorktreeProcess->isSuccessful()) {
@@ -70,13 +76,13 @@ class GitService
         }
 
         $deleteBranchCommand = match (true) {
-            $deleteBranch && $forceDeleteBranch => 'git branch --delete --force '.$workspaceData->branch,
-            $deleteBranch => 'git branch --delete '.$workspaceData->branch,
+            $deleteBranch && $forceDeleteBranch => 'git branch --delete --force '.$branch,
+            $deleteBranch => 'git branch --delete '.$branch,
             default => null,
         };
 
         if ($deleteBranchCommand) {
-            $deleteBranchProcess = Process::fromShellCommandline($deleteBranchCommand, $projectData->path);
+            $deleteBranchProcess = Process::fromShellCommandline($deleteBranchCommand, $mainWorktreePath);
             $deleteBranchProcess->run();
 
             if (! $deleteBranchProcess->isSuccessful()) {
@@ -142,7 +148,7 @@ class GitService
     /**
      * Bare worktrees have no working tree to open, so they are excluded.
      */
-    private function parseRecord(string $record, int $key): ?WorktreeData
+    protected function parseRecord(string $record, int $key): ?WorktreeData
     {
         $fields = $this->parseFields($record);
 
@@ -161,7 +167,7 @@ class GitService
     /**
      * @return array<string, string|null>
      */
-    private function parseFields(string $record): array
+    protected function parseFields(string $record): array
     {
         return collect(explode("\n", trim($record)))
             ->filter()
