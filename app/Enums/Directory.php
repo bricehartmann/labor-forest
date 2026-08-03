@@ -4,7 +4,7 @@ namespace App\Enums;
 
 enum Directory: string
 {
-    case BASE = '.labor-forest';
+    case BASE = '.laborforest';
     case IGNORED = 'ignored';
     case WORKFLOWS = 'workflows';
 }
