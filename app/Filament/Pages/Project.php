@@ -5,6 +5,8 @@ namespace App\Filament\Pages;
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Data\GitStatusEntryData;
 use App\Data\ProjectData;
+use App\Data\WorkflowData;
+use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\GitStatus;
@@ -19,6 +21,7 @@ use App\Services\GitService;
 use App\Services\LaunchService;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
+use App\Services\WorkflowService;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -30,6 +33,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -45,6 +49,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Throwable;
@@ -62,6 +67,9 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
     #[Locked]
     public array $project = [];
+
+    #[Locked]
+    public array $workflows = [];
 
     #[Locked]
     public array $workspaces = [];
@@ -111,11 +119,49 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         try {
             $this->project = $projectService->loadProject($uuid)->toArray();
             $this->workspaces = $projectService->loadProjectWorkspaces($this->projectData->path)->toArray();
+            $this->workflows = $this->loadWorkspaceWorkflows();
         } catch (InvalidProjectsFile $e) {
             $this->loadedInvalidMessage = $e->messagesAsString();
         } catch (Exception $e) {
             $this->loadedInvalidMessage = $e->getMessage();
         }
+    }
+
+    /**
+     * @return array<string, array<string, int>> workspace path => (workflow name => sort order)
+     */
+    protected function loadWorkspaceWorkflows(): array
+    {
+        $workflowService = app(WorkflowService::class);
+
+        return collect($this->workspaces)
+            ->mapWithKeys(fn (array $workspace) => [
+                $workspace['path'] => $workflowService->loadWorkflows($workspace['path'])
+                    ->map(fn (WorkflowData $workflowData) => $workflowData->sort_order)
+                    ->all(),
+            ])
+            ->all();
+    }
+
+    /**
+     * The union of every workspace's workflow names, ordered by sort order then name.
+     *
+     * @return array<int, string>
+     */
+    protected function workflowNames(): array
+    {
+        $sortOrders = collect($this->workflows)->reduce(function (array $carry, array $workflows) {
+            foreach ($workflows as $name => $sortOrder) {
+                $carry[$name] = min($carry[$name] ?? $sortOrder, $sortOrder);
+            }
+
+            return $carry;
+        }, []);
+
+        return collect($sortOrders)
+            ->sortBy(fn (int $sortOrder, string $name) => [$sortOrder, $name])
+            ->keys()
+            ->all();
     }
 
     public static function getSlug($panel = null): string
@@ -446,6 +492,33 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
                             );
                         }),
+                    ...collect($this->workflowNames())
+                        ->map(fn (string $name) => Action::make('workflow_'.$name)
+                            ->label(Str::headline($name))
+                            ->icon(Heroicon::Play)
+                            ->hidden(fn (array $record) => ! array_key_exists($name, $this->workflows[$record['path']] ?? []))
+                            ->modal()
+                            ->modalHeading('Run '.Str::headline($name).' Workflow')
+                            ->modalDescription('Select which steps in the workflow you would like to run.')
+                            ->modalSubmitActionLabel('Run')
+                            ->modalFooterActionsAlignment(Alignment::End)
+                            ->modalWidth(Width::Large)
+                            ->schema(fn (array $record) => [
+                                ...collect(app(WorkflowService::class)->loadSteps($record['path'], $name))
+                                    ->map(fn (WorkflowStepData $step, int $index) => Checkbox::make('step_'.$index)
+                                        ->label($step->name)
+                                        ->default(true)
+                                    ),
+                            ])
+                            ->action(function () use ($name) {
+                                // TODO: execute the workflow once a runner service exists
+                                Notification::make()
+                                    ->warning()
+                                    ->title('Workflow runner not implemented')
+                                    ->body(Str::headline($name).' cannot run yet.')
+                                    ->send();
+                            }))
+                        ->all(),
                 ])
                     ->button()
                     ->label('Workflows')
