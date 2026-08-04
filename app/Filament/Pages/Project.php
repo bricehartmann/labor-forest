@@ -13,6 +13,7 @@ use App\Enums\GitStatus;
 use App\Enums\Regex;
 use App\Enums\SessionKey;
 use App\Enums\Variable;
+use App\Enums\WorkflowKnownName;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\GitOperationFailed;
 use App\Exceptions\InvalidProjectsFile;
@@ -496,7 +497,16 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                         ->map(fn (string $name) => Action::make('workflow_'.$name)
                             ->label(Str::headline($name))
                             ->icon(Heroicon::Play)
-                            ->hidden(fn (array $record) => ! array_key_exists($name, $this->workflows[$record['path']] ?? []))
+                            ->hidden(function (array $record) use ($name) {
+                                if (! array_key_exists($name, $this->workflows[$record['path']] ?? [])) {
+                                    return true;
+                                }
+
+                                $requiredStatus = WorkflowKnownName::tryFrom($name)?->requiredWorkspaceStatus();
+
+                                return $requiredStatus !== null
+                                    && $record['status'] !== $requiredStatus->value;
+                            })
                             ->modal()
                             ->modalHeading('Run '.Str::headline($name).' Workflow')
                             ->modalDescription('Select which steps in the workflow you would like to run.')
