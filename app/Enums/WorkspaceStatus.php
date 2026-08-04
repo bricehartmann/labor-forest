@@ -27,4 +27,12 @@ enum WorkspaceStatus: string implements HasColor, HasLabel
             self::ERROR => 'danger',
         };
     }
+
+    public function ableToRunWorkflow(): bool
+    {
+        return match ($this) {
+            self::READY, self::SUSPENDED => true,
+            default => false,
+        };
+    }
 }

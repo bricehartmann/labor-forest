@@ -498,6 +498,12 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             ->label(Str::headline($name))
                             ->icon(Heroicon::Play)
                             ->hidden(function (array $record) use ($name) {
+                                $status = WorkspaceStatus::from($record['status']);
+
+                                if (! $status->ableToRunWorkflow()) {
+                                    return true;
+                                }
+
                                 if (! array_key_exists($name, $this->workflows[$record['path']] ?? [])) {
                                     return true;
                                 }
