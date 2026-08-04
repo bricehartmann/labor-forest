@@ -8,6 +8,7 @@ use App\Data\WorkflowData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Data\WorkspaceStatusData;
+use App\Data\WorktreeData;
 use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
@@ -23,6 +24,7 @@ use App\Exceptions\ProjectDirectoryExists;
 use App\Exceptions\ProjectDirectoryNotFound;
 use App\Exceptions\ProjectDirectoryNotGitRepository;
 use App\Exceptions\ProjectNotFound;
+use App\Exceptions\WorkspaceNotFound;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -159,25 +161,35 @@ class ProjectsService
      */
     public function loadProjectWorkspaces(string $path): Collection
     {
-        $worktrees = rescue(fn () => app(GitService::class)->listWorktrees($path), []);
+        return collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []))
+            ->map(fn (WorktreeData $worktreeData) => $this->makeWorkspaceData($worktreeData));
+    }
 
-        $workspaces = collect();
+    /**
+     * @throws WorkspaceNotFound
+     */
+    public function loadProjectWorkspace(string $workspacePath): WorkspaceData
+    {
+        $worktrees = rescue(fn () => app(GitService::class)->listWorktrees($workspacePath), collect());
 
-        foreach ($worktrees as $worktree) {
-            $status = $this->loadProjectWorkspaceStatus($worktree->path);
+        $worktreeData = $worktrees->firstWhere('path', $workspacePath);
 
-            $workspaceData = new WorkspaceData(
-                is_primary: $worktree->is_primary,
-                path: $worktree->path,
-                branch: $worktree->branch,
-                status: $status,
-                git_status: $this->loadProjectWorkspaceGitStatus($worktree->path),
-            );
-
-            $workspaces->push($workspaceData);
+        if (! $worktreeData) {
+            throw new WorkspaceNotFound($workspacePath);
         }
 
-        return $workspaces;
+        return $this->makeWorkspaceData($worktreeData);
+    }
+
+    protected function makeWorkspaceData(WorktreeData $worktreeData): WorkspaceData
+    {
+        return new WorkspaceData(
+            is_primary: $worktreeData->is_primary,
+            path: $worktreeData->path,
+            branch: $worktreeData->branch,
+            status: $this->loadProjectWorkspaceStatus($worktreeData->path),
+            git_status: $this->loadProjectWorkspaceGitStatus($worktreeData->path),
+        );
     }
 
     public function updateProjectWorkspaceStatus(string $path, WorkspaceStatus $workspaceStatus): void
@@ -193,7 +205,7 @@ class ProjectsService
         \Illuminate\Support\Facades\File::put($statusPath, Yaml::dump((new WorkspaceStatusData($workspaceStatus))->toArray(), 10));
     }
 
-    protected function loadProjectWorkspaceStatus(string $path): WorkspaceStatus
+    public function loadProjectWorkspaceStatus(string $path): WorkspaceStatus
     {
         $statusPath = implode(DIRECTORY_SEPARATOR, [
             $path,

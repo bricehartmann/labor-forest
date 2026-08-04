@@ -34,7 +34,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Infolists\Components\TextEntry;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -521,18 +520,25 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             ->modalWidth(Width::Large)
                             ->schema(fn (array $record) => [
                                 ...collect(app(WorkflowService::class)->loadSteps($record['path'], $name))
-                                    ->map(fn (WorkflowStepData $step, int $index) => Checkbox::make('step_'.$index)
+                                    ->map(fn (WorkflowStepData $step, int $index) => Checkbox::make('step_'.$step->hash())
                                         ->label($step->name)
                                         ->default(true)
                                     ),
                             ])
-                            ->action(function () use ($name) {
-                                // TODO: execute the workflow once a runner service exists
-                                Notification::make()
-                                    ->warning()
-                                    ->title('Workflow runner not implemented')
-                                    ->body(Str::headline($name).' cannot run yet.')
-                                    ->send();
+                            ->action(function (array $data, array $record) use ($name) {
+                                static::resultNotificationOperation(
+                                    callback: function () use ($data, $record, $name) {
+                                        $runSteps = collect($data)
+                                            ->reject(fn ($datum) => ! $datum)
+                                            ->map(fn ($datum, $key) => Str::replaceStart('step_', '', $key))
+                                            ->values()
+                                            ->all();
+
+                                        app(WorkflowService::class)->dispatchWorkflow($record['path'], $name, $runSteps);
+                                    },
+                                    successTitle: Str::headline($name).' workflow started',
+                                    failureBody: fn (Throwable $th) => $th->getMessage(),
+                                );
                             }))
                         ->all(),
                 ])

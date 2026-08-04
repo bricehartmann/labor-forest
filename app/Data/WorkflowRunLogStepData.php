@@ -2,6 +2,7 @@
 
 namespace App\Data;
 
+use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Rules\ValidVariables;
 use Spatie\LaravelData\Attributes\WithCast;
@@ -10,25 +11,21 @@ use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Support\Transformation\TransformationContext;
 use Spatie\LaravelData\Support\Transformation\TransformationContextFactory;
 
-class WorkflowStepData extends Data
+class WorkflowRunLogStepData extends Data
 {
     public function __construct(
         public string $name,
         #[WithCast(EnumCast::class)]
         public WorkflowStepType $type,
+        public int $exitCode,
+        public string $output,
+        #[WithCast(EnumCast::class)]
+        public ?WorkflowStepSkipReason $skip_reason = null,
         public ?array $env = null,
         public ?string $condition = null,
         public ?string $run = null,
         public ?array $map = null,
     ) {}
-
-    public function hash(): string
-    {
-        $array = $this->toArray();
-        ksort($array);
-
-        return md5(json_encode($array));
-    }
 
     public static function rules(): array
     {

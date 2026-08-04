@@ -41,6 +41,12 @@
         }
     },
     "scripts": {
+        "logs:tail": [
+            "tail -f ~/Library/Application\\ Support/laborforest-dev/storage/logs/laravel.log"
+        ],
+        "logs:wipe": [
+            "truncate -s 0 ~/Library/Application\\ Support/laborforest-dev/storage/logs/laravel.log"
+        ],
         "setup": [
             "composer install",
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",

@@ -7,6 +7,7 @@ use App\Enums\Directory;
 use App\Enums\FileExtension;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Jobs\RunWorkflow;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +17,11 @@ use Symfony\Component\Yaml\Yaml;
 
 class WorkflowService
 {
+    public function dispatchWorkflow(string $workspacePath, string $workflowName, array $stepHashes): void
+    {
+        dispatch(new RunWorkflow($workspacePath, $workflowName, $stepHashes));
+    }
+
     /**
      * @throws InvalidWorkflowFile
      */
