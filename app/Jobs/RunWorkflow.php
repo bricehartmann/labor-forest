@@ -28,7 +28,7 @@ class RunWorkflow implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null)
+    public function __construct(public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null, public int $timeout = 0)
     {
         //
     }

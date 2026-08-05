@@ -525,16 +525,23 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                         ->default(true)
                                     ),
                             ])
-                            ->action(function (array $data, array $record) use ($name) {
+                            ->action(function (array $data, array $record) use ($name, $settings) {
                                 static::resultNotificationOperation(
-                                    callback: function () use ($data, $record, $name) {
+                                    callback: function () use ($data, $record, $name, $settings) {
                                         $runSteps = collect($data)
                                             ->reject(fn ($datum) => ! $datum)
                                             ->map(fn ($datum, $key) => Str::replaceStart('step_', '', $key))
                                             ->values()
                                             ->all();
 
-                                        app(WorkflowService::class)->dispatchWorkflow($record['path'], $name, $runSteps);
+                                        app(WorkflowService::class)->dispatchWorkflow(
+                                            projectUuid: $this->projectData->uuid,
+                                            workspacePath: $record['path'],
+                                            workflowName: $name,
+                                            stepHashes: $runSteps,
+                                            parent: null,
+                                            timeoutSeconds: $settings->workflow_timeout_seconds,
+                                        );
                                     },
                                     successTitle: Str::headline($name).' workflow started',
                                     failureBody: fn (Throwable $th) => $th->getMessage(),

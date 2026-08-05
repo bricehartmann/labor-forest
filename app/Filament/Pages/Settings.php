@@ -67,6 +67,16 @@ class Settings extends Page
                                 ->label('Enable dark mode'),
                         ]),
                 ]),
+                Section::make('Workflows')
+                    ->description('Configure how workflows run on your machine.')
+                    ->schema([
+                        TextInput::make('workflow_timeout_seconds')
+                            ->label('Timeout')
+                            ->numeric()
+                            ->minValue(1)
+                            ->required()
+                            ->suffix('seconds'),
+                    ]),
                 Section::make('Launch commands')
                     ->description(new HtmlString('Commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Each command can be overridden at the project level.'))
                     ->schema([

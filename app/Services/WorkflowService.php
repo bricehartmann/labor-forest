@@ -17,9 +17,9 @@ use Symfony\Component\Yaml\Yaml;
 
 class WorkflowService
 {
-    public function dispatchWorkflow(string $workspacePath, string $workflowName, array $stepHashes): void
+    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parent, int $timeoutSeconds): void
     {
-        dispatch(new RunWorkflow($workspacePath, $workflowName, $stepHashes));
+        dispatch(new RunWorkflow($projectUuid, $workspacePath, $workflowName, $stepHashes, $parent, $timeoutSeconds));
     }
 
     /**

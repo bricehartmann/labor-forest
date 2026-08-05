@@ -10,6 +10,7 @@ class SettingsData extends Data
     public function __construct(
         public bool $dark_mode = true,
         public bool $desktop_notifications = true,
+        public int $workflow_timeout_seconds = 600,
         public ?string $command_launch_ide = null,
         public ?string $command_launch_browser = null,
         public ?string $command_launch_terminal = null,
