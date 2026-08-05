@@ -16,6 +16,7 @@ use App\Events\ProjectDataUpdated;
 use App\Events\WorkflowFinished;
 use App\Events\WorkflowStepFinished;
 use App\Events\WorkflowStepOutputUpdated;
+use App\Events\WorkflowStepSkipped;
 use App\Events\WorkflowStepStarted;
 use App\Services\ProjectsService;
 use App\Services\VariableReplacementService;
@@ -211,7 +212,7 @@ class RunWorkflow implements ShouldQueue
                     name: $step->name,
                     type: $step->type,
                     exitCode: 0,
-                    output: implode(PHP_EOL, $written),
+                    output: '',
                     skip_reason: $skipReason,
                     env: $step->env,
                     condition: $step->condition,
@@ -244,6 +245,14 @@ class RunWorkflow implements ShouldQueue
                     map: $step->map,
                 ));
                 $this->writeLog($logPath, $logData);
+
+                broadcast(new WorkflowStepSkipped(
+                    projectUuid: $projectData->uuid,
+                    workspaceSlugKebab: $workspaceData->slugKebab(),
+                    workflowName: $this->workflowName,
+                    stepHash: $stepHash,
+                    reason: $skipReason->value,
+                ));
             }
         }
 
