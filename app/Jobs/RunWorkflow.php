@@ -212,7 +212,7 @@ class RunWorkflow implements ShouldQueue
             }
         }
 
-        $projectService->updateProjectWorkspaceStatus($projectData->path, match (true) {
+        $projectService->updateProjectWorkspaceStatus($workspaceData->path, match (true) {
             ! $allSuccessful => WorkspaceStatus::ERROR,
             $this->workflowName === WorkflowKnownName::DOWN->value => WorkspaceStatus::SUSPENDED,
             $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
