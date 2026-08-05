@@ -247,13 +247,6 @@ class RunWorkflow implements ShouldQueue
             }
         }
 
-        $projectService->updateProjectWorkspaceStatus($workspaceData->path, match (true) {
-            ! $allSuccessful => WorkspaceStatus::ERROR,
-            $this->workflowName === WorkflowKnownName::DOWN->value => WorkspaceStatus::SUSPENDED,
-            $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
-            default => $currentStatus,
-        });
-
         if ($allSuccessful) {
             $logData->status = WorkflowStatus::SUCCESS;
         } else {
@@ -268,6 +261,15 @@ class RunWorkflow implements ShouldQueue
             workflowName: $this->workflowName,
             status: $allSuccessful ? WorkflowStatus::SUCCESS->value : WorkflowStatus::FAILED->value,
         ));
+
+        $projectService->updateProjectWorkspaceStatus($workspaceData->path, match (true) {
+            ! $allSuccessful => WorkspaceStatus::ERROR,
+            $this->workflowName === WorkflowKnownName::DOWN->value => WorkspaceStatus::SUSPENDED,
+            $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
+            default => $currentStatus,
+        });
+
+        broadcast(new ProjectDataUpdated($projectData->uuid));
     }
 
     /**
@@ -309,5 +311,7 @@ class RunWorkflow implements ShouldQueue
         $projectService = app(ProjectsService::class);
         $projectData = $projectService->loadProject($this->projectUuid);
         $projectService->updateProjectWorkspaceStatus($projectData->path, WorkspaceStatus::ERROR);
+
+        broadcast(new ProjectDataUpdated($projectData->uuid));
     }
 }
