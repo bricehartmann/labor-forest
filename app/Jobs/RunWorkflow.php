@@ -40,11 +40,10 @@ class RunWorkflow implements ShouldQueue
     {
         $projectService = app(ProjectsService::class);
         $projectData = $projectService->loadProject($this->projectUuid);
-        $currentStatus = $projectService->loadProjectWorkspaceStatus($projectData->path);
-        $projectService->updateProjectWorkspaceStatus($projectData->path, WorkspaceStatus::CHANGING);
-        // todo: broadcast event???
 
         $workspaceData = $projectService->loadProjectWorkspace($this->workspacePath);
+        $currentStatus = $projectService->loadProjectWorkspaceStatus($workspaceData->path);
+        $projectService->updateProjectWorkspaceStatus($projectData->path, WorkspaceStatus::CHANGING);
         $workflowPath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
             Directory::BASE->value,
@@ -54,6 +53,7 @@ class RunWorkflow implements ShouldQueue
 
         $workflowData = app(WorkflowService::class)->loadWorkflow($workflowPath);
 
+        // todo: broadcast event???
         $logPath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
             Directory::BASE->value,
