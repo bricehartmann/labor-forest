@@ -16,9 +16,9 @@ class SettingsData extends Data
         public ?string $command_launch_terminal = null,
     ) {}
 
-    public static function defaults(): self
+    public static function defaults(): static
     {
-        return new self(
+        return new static(
             command_launch_ide: 'open "{{ WORKSPACE_DIR }}" -a phpstorm',
             command_launch_browser: 'open "{{ ENV_APP_URL }}"',
             command_launch_terminal: 'open "{{ WORKSPACE_DIR }}" -a iterm',
