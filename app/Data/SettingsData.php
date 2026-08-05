@@ -16,6 +16,15 @@ class SettingsData extends Data
         public ?string $command_launch_terminal = null,
     ) {}
 
+    public static function defaults(): self
+    {
+        return new self(
+            command_launch_ide: 'open "{{ WORKSPACE_DIR }}" -a phpstorm',
+            command_launch_browser: 'open "{{ ENV_APP_URL }}"',
+            command_launch_terminal: 'open "{{ WORKSPACE_DIR }}" -a iterm',
+        );
+    }
+
     public static function rules(): array
     {
         return [
@@ -26,6 +35,11 @@ class SettingsData extends Data
             'desktop_notifications' => [
                 'required',
                 'boolean',
+            ],
+            'workflow_timeout_seconds' => [
+                'required',
+                'integer',
+                'min:0',
             ],
             'command_launch_ide' => [
                 'nullable',

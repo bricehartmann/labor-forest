@@ -20,12 +20,7 @@ class SettingsService
     public function loadSettings(): SettingsData
     {
         $this->ensureBaseDirectoryExists();
-        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump((new SettingsData(
-            desktop_notifications: true,
-            command_launch_ide: 'open "{{ WORKSPACE_DIR }}" -a phpstorm',
-            command_launch_browser: 'open "{{ ENV_APP_URL }}"',
-            command_launch_terminal: 'open "{{ WORKSPACE_DIR }}" -a iterm',
-        ))->toArray(), inline: 10));
+        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump(SettingsData::defaults()->toArray(), inline: 10));
 
         $path = $this->makeRelativeBasePath(File::SETTINGS->value);
 
@@ -40,7 +35,10 @@ class SettingsService
         }
 
         try {
-            return SettingsData::validateAndCreate($yaml ?? []);
+            return SettingsData::validateAndCreate(array_merge(
+                SettingsData::defaults()->toArray(),
+                $yaml ?? [],
+            ));
         } catch (ValidationException $e) {
             throw InvalidSettingsFile::fromValidation($path, $e);
         }
@@ -50,5 +48,15 @@ class SettingsService
     {
         $this->ensureBaseDirectoryExists();
         $this->putBaseFile(File::SETTINGS->value, Yaml::dump($settings->toArray(), inline: 10));
+    }
+
+    /**
+     * Rewrite the settings file so it contains every key the application knows about.
+     *
+     * @throws InvalidSettingsFile when the file is unparseable, malformed, or fails validation
+     */
+    public function syncSettingsFile(): void
+    {
+        $this->saveSettings($this->loadSettings());
     }
 }

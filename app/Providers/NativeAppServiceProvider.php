@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\SettingsService;
 use Native\Desktop\Contracts\ProvidesPhpIni;
 use Native\Desktop\Facades\Window;
 
@@ -13,6 +14,8 @@ class NativeAppServiceProvider implements ProvidesPhpIni
      */
     public function boot(): void
     {
+        rescue(fn () => app(SettingsService::class)->syncSettingsFile());
+
         Window::open()
             ->maximized();
     }

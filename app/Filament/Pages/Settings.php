@@ -73,7 +73,7 @@ class Settings extends Page
                         TextInput::make('workflow_timeout_seconds')
                             ->label('Timeout')
                             ->numeric()
-                            ->minValue(1)
+                            ->minValue(0)
                             ->required()
                             ->suffix('seconds'),
                     ]),
