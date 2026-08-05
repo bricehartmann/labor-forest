@@ -326,7 +326,7 @@ class ProjectsService
             $stepCopyEnv = new WorkflowStepData(
                 name: 'Copy .env file',
                 type: WorkflowStepType::SHELL,
-                condition: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"',
+                if: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"',
                 run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env'
             );
             $workflowUp = new WorkflowData(

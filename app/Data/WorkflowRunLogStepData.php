@@ -17,12 +17,13 @@ class WorkflowRunLogStepData extends Data
         public string $name,
         #[WithCast(EnumCast::class)]
         public WorkflowStepType $type,
-        public int $exitCode,
+        public ?int $exitCode,
         public string $output,
         #[WithCast(EnumCast::class)]
         public ?WorkflowStepSkipReason $skip_reason = null,
         public ?array $env = null,
-        public ?string $condition = null,
+        public ?string $if = null,
+        public ?string $unless = null,
         public ?string $run = null,
         public ?array $map = null,
     ) {}
@@ -42,7 +43,12 @@ class WorkflowRunLogStepData extends Data
                 'nullable',
                 'array',
             ],
-            'condition' => [
+            'if' => [
+                'nullable',
+                'string',
+                new ValidVariables,
+            ],
+            'unless' => [
                 'nullable',
                 'string',
                 new ValidVariables,

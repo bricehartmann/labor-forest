@@ -2,8 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Data\ProjectData;
+use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\File as FileName;
 use App\Enums\FileExtension;
@@ -112,6 +115,64 @@ class RunWorkflow implements ShouldQueue
             'log_path' => $this->logFilePath,
         ]));
 
+        try {
+            $allSuccessful = $this->runSteps($workflowData, $projectData, $workspaceData);
+        } catch (Throwable $throwable) {
+            Log::error('workflow: step threw, aborting workflow', $this->logContext([
+                'exception' => $throwable->getMessage(),
+            ]));
+
+            $this->workflowRunLogData->exception = $throwable->getMessage();
+            $allSuccessful = false;
+        }
+
+        if ($allSuccessful) {
+            $this->workflowRunLogData->status = WorkflowStatus::SUCCESS;
+        } else {
+            $this->workflowRunLogData->status = WorkflowStatus::FAILED;
+        }
+
+        Log::info('workflow: run finished', $this->logContext([
+            'status' => $this->workflowRunLogData->status->value,
+            'all_successful' => $allSuccessful,
+            'steps_logged' => $this->workflowRunLogData->steps->count(),
+        ]));
+
+        $this->writeLog();
+
+        broadcast(new WorkflowFinished(
+            projectUuid: $projectData->uuid,
+            workspaceSlugKebab: $workspaceData->slugKebab(),
+            workflowName: $this->workflowName,
+            status: $allSuccessful ? WorkflowStatus::SUCCESS->value : WorkflowStatus::FAILED->value,
+        ));
+
+        $finalStatus = match (true) {
+            ! $allSuccessful => WorkspaceStatus::ERROR,
+            $this->workflowName === WorkflowKnownName::DOWN->value => WorkspaceStatus::SUSPENDED,
+            $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
+            default => $currentStatus,
+        };
+
+        Log::info('workflow: resolving workspace status', $this->logContext([
+            'final_status' => $finalStatus->value,
+            'all_successful' => $allSuccessful,
+        ]));
+
+        $projectService->updateProjectWorkspaceStatus($workspaceData->path, $finalStatus);
+
+        broadcast(new ProjectDataUpdated($projectData->uuid));
+
+        Log::info('workflow: job completed', $this->logContext());
+    }
+
+    /**
+     * Run every step in the workflow, returning false as soon as one of them fails.
+     *
+     * @throws Throwable
+     */
+    protected function runSteps(WorkflowData $workflowData, ProjectData $projectData, WorkspaceData $workspaceData): bool
+    {
         $replacementService = app(VariableReplacementService::class);
 
         $allSuccessful = true;
@@ -158,36 +219,64 @@ class RunWorkflow implements ShouldQueue
                 ]);
             }
 
-            if (! $skipReason && $step->condition) {
-                $condition = $replacementService->replace(
+            if (! $skipReason && $step->if) {
+                $if = $replacementService->replace(
                     projectData: $projectData,
                     workspaceData: $workspaceData,
-                    content: $step->condition,
+                    content: $step->if,
                 );
 
-                Log::info('workflow: evaluating step condition', [
+                Log::info('workflow: evaluating step if', [
                     ...$stepContext,
-                    'condition' => $condition,
+                    'if' => $if,
+                    'env' => $env,
                 ]);
 
-                $conditionProcess = Process::fromShellCommandline(
-                    command: $condition,
-                    cwd: $workspaceData->path,
-                    env: $env,
-                );
-                $conditionProcess->run();
+                $ifProcess = $this->evaluateGate($if, $workspaceData->path, $env);
 
-                if (! $conditionProcess->isSuccessful()) {
-                    $skipReason = WorkflowStepSkipReason::CONDITION_FAILED;
+                if (! $ifProcess->isSuccessful()) {
+                    $skipReason = WorkflowStepSkipReason::IF_FAILED;
 
-                    Log::info('workflow: step condition failed', [
+                    Log::info('workflow: step if failed', [
                         ...$stepContext,
-                        'exit_code' => $conditionProcess->getExitCode(),
+                        'exit_code' => $ifProcess->getExitCode(),
+                        'error' => $ifProcess->getErrorOutput(),
                     ]);
                 } else {
-                    Log::info('workflow: step condition passed', [
+                    Log::info('workflow: step if passed', [
                         ...$stepContext,
-                        'exit_code' => $conditionProcess->getExitCode(),
+                        'exit_code' => $ifProcess->getExitCode(),
+                    ]);
+                }
+            }
+
+            if (! $skipReason && $step->unless) {
+                $unless = $replacementService->replace(
+                    projectData: $projectData,
+                    workspaceData: $workspaceData,
+                    content: $step->unless,
+                );
+
+                Log::info('workflow: evaluating step unless', [
+                    ...$stepContext,
+                    'unless' => $unless,
+                    'env' => $env,
+                ]);
+
+                $unlessProcess = $this->evaluateGate($unless, $workspaceData->path, $env);
+
+                if ($unlessProcess->isSuccessful()) {
+                    $skipReason = WorkflowStepSkipReason::UNLESS_MATCHED;
+
+                    Log::info('workflow: step unless matched', [
+                        ...$stepContext,
+                        'exit_code' => $unlessProcess->getExitCode(),
+                    ]);
+                } else {
+                    Log::info('workflow: step unless did not match', [
+                        ...$stepContext,
+                        'exit_code' => $unlessProcess->getExitCode(),
+                        'error' => $unlessProcess->getErrorOutput(),
                     ]);
                 }
             }
@@ -211,6 +300,7 @@ class RunWorkflow implements ShouldQueue
                     cwd: $workspaceData->path,
                     env: $env,
                 );
+                $runProcess->setTimeout($this->timeout ?: null);
                 $runProcess->run(function ($type, $buffer) use (&$output, $projectData, $workspaceData, $stepHash): void {
                     if ($type === Process::ERR) {
                         $output .= 'ERROR: '.$buffer;
@@ -241,7 +331,8 @@ class RunWorkflow implements ShouldQueue
                     output: $output,
                     skip_reason: $skipReason,
                     env: $step->env,
-                    condition: $step->condition,
+                    if: $step->if,
+                    unless: $step->unless,
                     run: $step->run,
                     map: null,
                 ));
@@ -311,7 +402,8 @@ class RunWorkflow implements ShouldQueue
                     output: '',
                     skip_reason: $skipReason,
                     env: $step->env,
-                    condition: $step->condition,
+                    if: $step->if,
+                    unless: $step->unless,
                     run: null,
                     map: $step->map,
                 ));
@@ -336,11 +428,12 @@ class RunWorkflow implements ShouldQueue
                 $this->workflowRunLogData->appendToSteps(new WorkflowRunLogStepData(
                     name: $step->name,
                     type: $step->type,
-                    exitCode: 0,
+                    exitCode: null,
                     output: '',
                     skip_reason: $skipReason,
                     env: $step->env,
-                    condition: $step->condition,
+                    if: $step->if,
+                    unless: $step->unless,
                     run: $step->run,
                     map: $step->map,
                 ));
@@ -366,44 +459,25 @@ class RunWorkflow implements ShouldQueue
             }
         }
 
-        if ($allSuccessful) {
-            $this->workflowRunLogData->status = WorkflowStatus::SUCCESS;
-        } else {
-            $this->workflowRunLogData->status = WorkflowStatus::FAILED;
-        }
+        return $allSuccessful;
+    }
 
-        Log::info('workflow: run finished', $this->logContext([
-            'status' => $this->workflowRunLogData->status->value,
-            'all_successful' => $allSuccessful,
-            'steps_logged' => $this->workflowRunLogData->steps->count(),
-        ]));
+    /**
+     * Run a step's if or unless command and return the finished process for exit code inspection.
+     *
+     * @param  array<string, string>  $env
+     */
+    protected function evaluateGate(string $command, string $cwd, array $env): Process
+    {
+        $process = Process::fromShellCommandline(
+            command: $command,
+            cwd: $cwd,
+            env: $env,
+        );
+        $process->setTimeout($this->timeout ?: null);
+        $process->run();
 
-        $this->writeLog();
-
-        broadcast(new WorkflowFinished(
-            projectUuid: $projectData->uuid,
-            workspaceSlugKebab: $workspaceData->slugKebab(),
-            workflowName: $this->workflowName,
-            status: $allSuccessful ? WorkflowStatus::SUCCESS->value : WorkflowStatus::FAILED->value,
-        ));
-
-        $finalStatus = match (true) {
-            ! $allSuccessful => WorkspaceStatus::ERROR,
-            $this->workflowName === WorkflowKnownName::DOWN->value => WorkspaceStatus::SUSPENDED,
-            $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
-            default => $currentStatus,
-        };
-
-        Log::info('workflow: resolving workspace status', $this->logContext([
-            'final_status' => $finalStatus->value,
-            'all_successful' => $allSuccessful,
-        ]));
-
-        $projectService->updateProjectWorkspaceStatus($workspaceData->path, $finalStatus);
-
-        broadcast(new ProjectDataUpdated($projectData->uuid));
-
-        Log::info('workflow: job completed', $this->logContext());
+        return $process;
     }
 
     /**
@@ -464,10 +538,6 @@ class RunWorkflow implements ShouldQueue
                 'exception' => $exception?->getMessage(),
             ]));
 
-            $this->workflowRunLogData->exception = $exception?->getMessage();
-            $this->workflowRunLogData->status = WorkflowStatus::FAILED;
-            $this->writeLog();
-
             $projectService = app(ProjectsService::class);
             $projectData = $projectService->loadProject($this->projectUuid);
             $workspaceData = $projectService->loadProjectWorkspace($this->workspacePath);
@@ -486,8 +556,11 @@ class RunWorkflow implements ShouldQueue
             ]));
 
             broadcast(new ProjectDataUpdated($projectData->uuid));
-        } catch (Throwable $exception) {
-            Log::error('workflow: exception while handling failed job', ['exception' => $exception]);
+        } catch (Throwable $throwable) {
+            Log::error('workflow: exception while handling failed job', $this->logContext([
+                'job_exception' => $exception?->getMessage(),
+                'exception' => $throwable,
+            ]));
         }
     }
 }
