@@ -79,10 +79,10 @@ class RunWorkflow implements ShouldQueue
             'current_status' => $currentStatus->value,
         ]));
 
-        $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::CHANGING);
+        $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::WORKING);
         broadcast(new ProjectDataUpdated($projectData->uuid));
 
-        Log::info('workflow: workspace status set to changing', $this->logContext());
+        Log::info('workflow: workspace status set to working', $this->logContext());
 
         $this->logFilePath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
