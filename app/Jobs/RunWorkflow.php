@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
 use App\Enums\Directory;
+use App\Enums\File as FileName;
 use App\Enums\FileExtension;
 use App\Enums\WorkflowKnownName;
 use App\Enums\WorkflowStepSkipReason;
@@ -155,9 +156,46 @@ class RunWorkflow implements ShouldQueue
                     // todo: broadcast event???
                 }
             } elseif (! $skipReason && $step->type === WorkflowStepType::UPDATE_ENV) {
-                // todo: update env based on map
+                $envPath = $workspaceData->path.DIRECTORY_SEPARATOR.FileName::ENV->value;
+
+                if (! File::exists($envPath)) {
+                    File::put($envPath, '');
+                }
+
+                $contents = File::get($envPath);
+                $written = [];
+
+                foreach ($step->map ?? [] as $envKey => $envValue) {
+                    $value = $this->escapeEnvValue($replacementService->replace(
+                        projectData: $projectData,
+                        workspaceData: $workspaceData,
+                        content: (string) $envValue,
+                    ));
+
+                    $contents = $this->setEnvValue($contents, $envKey, $value);
+                    $written[] = $envKey.'='.$value;
+                }
+
+                File::put($envPath, $contents);
+
+                $logData->appendToSteps(new WorkflowRunLogStepData(
+                    name: $step->name,
+                    type: $step->type,
+                    exitCode: 0,
+                    output: implode(PHP_EOL, $written),
+                    skip_reason: $skipReason,
+                    env: $step->env,
+                    condition: $step->condition,
+                    run: null,
+                    map: $step->map,
+                ));
+                $this->writeLog($logPath, $logData);
+
+                // todo: broadcast event??? (success)
             } elseif (! $skipReason && $step->type === WorkflowStepType::WORKFLOW) {
                 // todo: dispatch workflow ???
+
+                // todo: broadcast event??? (workflow started/dispatched only)
             }
         }
 
@@ -167,6 +205,35 @@ class RunWorkflow implements ShouldQueue
             $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
             default => $currentStatus,
         });
+    }
+
+    /**
+     * Replace the given key's line within the .env contents, appending it when the key is absent.
+     */
+    protected function setEnvValue(string $contents, string $key, string $value): string
+    {
+        $line = $key.'='.$value;
+        $pattern = '/^'.preg_quote($key, '/').'=.*$/m';
+
+        if (preg_match($pattern, $contents) === 1) {
+            return preg_replace_callback($pattern, fn (): string => $line, $contents, 1);
+        }
+
+        $contents = rtrim($contents, "\r\n");
+
+        return ($contents === '' ? '' : $contents.PHP_EOL).$line.PHP_EOL;
+    }
+
+    /**
+     * Quote a value only when its contents would otherwise be misread by a .env parser.
+     */
+    protected function escapeEnvValue(string $value): string
+    {
+        if (preg_match('/[\s"\'#=]/', $value) !== 1) {
+            return $value;
+        }
+
+        return '"'.addcslashes($value, '\\"$').'"';
     }
 
     protected function writeLog(string $path, WorkflowRunLogData $logData): void
