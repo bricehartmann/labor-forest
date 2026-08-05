@@ -135,7 +135,7 @@ class ProjectsService
     ): WorkspaceData {
         $parentDir = $projectData->parentDir();
         $projectDir = $projectData->dirName();
-        $branchSlug = Str::slug($branch);
+        $branchSlug = Str::slug(Str::replace('/', '-', $branch));
         $newWorkspacePath = $parentDir.DIRECTORY_SEPARATOR.$projectDir.'-'.$branchSlug;
 
         $worktreeData = app(GitService::class)->addWorktree(

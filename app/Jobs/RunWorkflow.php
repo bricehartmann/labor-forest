@@ -43,7 +43,7 @@ class RunWorkflow implements ShouldQueue
 
         $workspaceData = $projectService->loadProjectWorkspace($this->workspacePath);
         $currentStatus = $projectService->loadProjectWorkspaceStatus($workspaceData->path);
-        $projectService->updateProjectWorkspaceStatus($projectData->path, WorkspaceStatus::CHANGING);
+        $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::CHANGING);
         $workflowPath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
             Directory::BASE->value,
