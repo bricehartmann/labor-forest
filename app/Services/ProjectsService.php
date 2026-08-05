@@ -324,7 +324,7 @@ class ProjectsService
 
         if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowUp)) {
             $stepCopyEnv = new WorkflowStepData(
-                name: 'Copy .env file from primary project directory',
+                name: 'Copy .env file',
                 type: WorkflowStepType::SHELL,
                 condition: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"',
                 run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env'
