@@ -15,6 +15,7 @@ use App\Enums\SessionKey;
 use App\Enums\Variable;
 use App\Enums\WorkflowKnownName;
 use App\Enums\WorkspaceStatus;
+use App\Events\ProjectDataUpdated;
 use App\Exceptions\GitOperationFailed;
 use App\Exceptions\InvalidProjectsFile;
 use App\Rules\ValidVariables;
@@ -52,6 +53,7 @@ use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Throwable;
 
 class Project extends Page implements HasActions, HasSchemas, HasTable
@@ -80,6 +82,14 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     public function projectData(): ProjectData
     {
         return ProjectData::from($this->project);
+    }
+
+    #[On('native:'.ProjectDataUpdated::class)]
+    public function onProjectDataUpdated(?string $projectUuid = null): void
+    {
+        if ($projectUuid === $this->projectData->uuid) {
+            $this->reloadData();
+        }
     }
 
     public function mount(string $uuid): void
@@ -520,7 +530,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             ->modalWidth(Width::Large)
                             ->schema(fn (array $record) => [
                                 ...collect(app(WorkflowService::class)->loadSteps($record['path'], $name))
-                                    ->map(fn (WorkflowStepData $step, int $index) => Checkbox::make('step_'.$step->hash())
+                                    ->map(fn (WorkflowStepData $step, int $index) => Checkbox::make('step_'.$step->hash((string) $index))
                                         ->label($step->name)
                                         ->default(true)
                                     ),
@@ -587,7 +597,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             );
                         }),
                     Action::make('remove')
-                        ->hidden(fn ($record) => $record['is_primary'])
+                        ->hidden(fn ($record) => $record['is_primary'] || $record['status'] === WorkspaceStatus::READY->value)
                         ->label('Remove')
                         ->icon(Heroicon::Trash)
                         ->modal()

@@ -22,9 +22,12 @@ class WorkflowStepData extends Data
         public ?array $map = null,
     ) {}
 
-    public function hash(): string
+    public function hash(string $index): string
     {
-        $array = $this->toArray();
+        $array = [
+            'index' => $index,
+            ...$this->toArray(),
+        ];
         ksort($array);
 
         return md5(json_encode($array));

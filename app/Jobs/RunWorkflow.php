@@ -12,6 +12,11 @@ use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
+use App\Events\ProjectDataUpdated;
+use App\Events\WorkflowFinished;
+use App\Events\WorkflowStepFinished;
+use App\Events\WorkflowStepOutputUpdated;
+use App\Events\WorkflowStepStarted;
 use App\Services\ProjectsService;
 use App\Services\VariableReplacementService;
 use App\Services\WorkflowService;
@@ -44,7 +49,6 @@ class RunWorkflow implements ShouldQueue
 
         $workspaceData = $projectService->loadProjectWorkspace($this->workspacePath);
         $currentStatus = $projectService->loadProjectWorkspaceStatus($workspaceData->path);
-        $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::CHANGING);
         $workflowPath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
             Directory::BASE->value,
@@ -54,7 +58,9 @@ class RunWorkflow implements ShouldQueue
 
         $workflowData = app(WorkflowService::class)->loadWorkflow($workflowPath);
 
-        // todo: broadcast event???
+        $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::CHANGING);
+        broadcast(new ProjectDataUpdated($projectData->uuid));
+
         $logPath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
             Directory::BASE->value,
@@ -81,12 +87,19 @@ class RunWorkflow implements ShouldQueue
 
         $allSuccessful = true;
 
-        foreach ($workflowData->steps as $step) {
-            // todo: broadcast event??? step started
+        foreach ($workflowData->steps as $index => $step) {
+            $stepHash = $step->hash((string) $index);
+
+            broadcast(new WorkflowStepStarted(
+                projectUuid: $projectData->uuid,
+                workspaceSlugKebab: $workspaceData->slugKebab(),
+                workflowName: $this->workflowName,
+                stepHash: $stepHash,
+            ));
 
             $skipReason = null;
 
-            if (! in_array($step->hash(), $this->stepHashes)) {
+            if (! in_array($stepHash, $this->stepHashes)) {
                 $skipReason = WorkflowStepSkipReason::NOT_SELECTED;
             }
 
@@ -127,14 +140,20 @@ class RunWorkflow implements ShouldQueue
                     cwd: $workspaceData->path,
                     env: $env,
                 );
-                $runProcess->run(function ($type, $buffer) use (&$output): void {
+                $runProcess->run(function ($type, $buffer) use (&$output, $projectData, $workspaceData, $stepHash): void {
                     if ($type === Process::ERR) {
                         $output .= 'ERROR: '.$buffer;
                     } else {
                         $output .= $buffer;
                     }
 
-                    // todo: broadcast event???
+                    broadcast(new WorkflowStepOutputUpdated(
+                        projectUuid: $projectData->uuid,
+                        workspaceSlugKebab: $workspaceData->slugKebab(),
+                        workflowName: $this->workflowName,
+                        stepHash: $stepHash,
+                        output: $output,
+                    ));
                 });
 
                 $logData->appendToSteps(new WorkflowRunLogStepData(
@@ -152,13 +171,18 @@ class RunWorkflow implements ShouldQueue
 
                 if (! $runProcess->isSuccessful()) {
                     $allSuccessful = false;
-                    // todo: broadcast event???
 
-                    $logData->status = WorkflowStatus::FAILED;
-                    $this->writeLog($logPath, $logData);
+                    // no need to broadcast WorkflowStepFinished because it will be picked up on data refresh from WorkflowFinished event
+
                     break;
                 } else {
-                    // todo: broadcast event???
+                    broadcast(new WorkflowStepFinished(
+                        projectUuid: $projectData->uuid,
+                        workspaceSlugKebab: $workspaceData->slugKebab(),
+                        workflowName: $this->workflowName,
+                        stepHash: $stepHash,
+                        status: WorkflowStatus::SUCCESS->value,
+                    ));
                 }
             } elseif (! $skipReason && $step->type === WorkflowStepType::UPDATE_ENV) {
                 $envPath = $workspaceData->path.DIRECTORY_SEPARATOR.FileName::ENV->value;
@@ -196,7 +220,13 @@ class RunWorkflow implements ShouldQueue
                 ));
                 $this->writeLog($logPath, $logData);
 
-                // todo: broadcast event??? (success)
+                broadcast(new WorkflowStepFinished(
+                    projectUuid: $projectData->uuid,
+                    workspaceSlugKebab: $workspaceData->slugKebab(),
+                    workflowName: $this->workflowName,
+                    stepHash: $stepHash,
+                    status: WorkflowStatus::SUCCESS->value,
+                ));
             } elseif (! $skipReason && $step->type === WorkflowStepType::WORKFLOW) {
                 // todo: dispatch workflow ???
 
@@ -224,10 +254,20 @@ class RunWorkflow implements ShouldQueue
             default => $currentStatus,
         });
 
-        if (! $allSuccessful) {
+        if ($allSuccessful) {
             $logData->status = WorkflowStatus::SUCCESS;
-            $this->writeLog($logPath, $logData);
+        } else {
+            $logData->status = WorkflowStatus::FAILED;
         }
+
+        $this->writeLog($logPath, $logData);
+
+        broadcast(new WorkflowFinished(
+            projectUuid: $projectData->uuid,
+            workspaceSlugKebab: $workspaceData->slugKebab(),
+            workflowName: $this->workflowName,
+            status: $allSuccessful ? WorkflowStatus::SUCCESS->value : WorkflowStatus::FAILED->value,
+        ));
     }
 
     /**
