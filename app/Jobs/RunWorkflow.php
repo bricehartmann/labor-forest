@@ -67,7 +67,7 @@ class RunWorkflow implements ShouldQueue
 
         $now = now();
 
-        $logFileName = $now->format('Ymd\THis\Z').$workspaceData->slugKebab().'_'.Str::slug($this->workflowName).'.yaml';
+        $logFileName = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($this->workflowName).'.yaml';
         $logPath .= DIRECTORY_SEPARATOR.$logFileName;
         $logData = new WorkflowRunLogData(
             parent: $this->parent,
@@ -196,6 +196,19 @@ class RunWorkflow implements ShouldQueue
                 // todo: dispatch workflow ???
 
                 // todo: broadcast event??? (workflow started/dispatched only)
+            } elseif ($skipReason) {
+                $logData->appendToSteps(new WorkflowRunLogStepData(
+                    name: $step->name,
+                    type: $step->type,
+                    exitCode: 0,
+                    output: '',
+                    skip_reason: $skipReason,
+                    env: $step->env,
+                    condition: $step->condition,
+                    run: $step->run,
+                    map: $step->map,
+                ));
+                $this->writeLog($logPath, $logData);
             }
         }
 
