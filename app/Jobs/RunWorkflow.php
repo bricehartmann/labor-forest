@@ -8,6 +8,7 @@ use App\Enums\Directory;
 use App\Enums\File as FileName;
 use App\Enums\FileExtension;
 use App\Enums\WorkflowKnownName;
+use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
@@ -72,6 +73,7 @@ class RunWorkflow implements ShouldQueue
         $logData = new WorkflowRunLogData(
             parent: $this->parent,
             timestamp: $now->timestamp,
+            status: WorkflowStatus::RUNNING,
             steps: collect(),
         );
 
@@ -151,6 +153,9 @@ class RunWorkflow implements ShouldQueue
                 if (! $runProcess->isSuccessful()) {
                     $allSuccessful = false;
                     // todo: broadcast event???
+
+                    $logData->status = WorkflowStatus::FAILED;
+                    $this->writeLog($logPath, $logData);
                     break;
                 } else {
                     // todo: broadcast event???
@@ -218,6 +223,11 @@ class RunWorkflow implements ShouldQueue
             $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
             default => $currentStatus,
         });
+
+        if (! $allSuccessful) {
+            $logData->status = WorkflowStatus::SUCCESS;
+            $this->writeLog($logPath, $logData);
+        }
     }
 
     /**
