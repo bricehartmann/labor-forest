@@ -62,7 +62,7 @@ class WorkflowService
                 return is_array($yaml) && ($yaml['resource_type'] ?? null) === YamlResourceType::WORKFLOW->value;
             })
             ->mapWithKeys(fn (SplFileInfo $file) => [
-                $file->getFilenameWithoutExtension() => rescue(fn () => $this->loadWorkflow($file->getPathname())),
+                $file->getFilenameWithoutExtension() => $this->loadWorkflow($file->getPathname()),
             ])
             ->filter()
             ->reject(fn (WorkflowData $data) => $data->steps->isEmpty())
