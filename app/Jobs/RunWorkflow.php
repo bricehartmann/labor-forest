@@ -34,6 +34,10 @@ class RunWorkflow implements ShouldQueue
 {
     use Queueable;
 
+    public ?string $logFilePath = null;
+
+    public ?WorkflowRunLogData $workflowRunLogData = null;
+
     /**
      * Create a new job instance.
      */
@@ -77,34 +81,35 @@ class RunWorkflow implements ShouldQueue
 
         Log::info('workflow: workspace status set to changing', $this->logContext());
 
-        $logPath = implode(DIRECTORY_SEPARATOR, [
+        $this->logFilePath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
             Directory::BASE->value,
             Directory::IGNORED->value,
             Directory::LOGS->value,
         ]);
 
-        if (! File::exists($logPath)) {
-            File::makeDirectory($logPath);
+        if (! File::exists($this->logFilePath)) {
+            File::makeDirectory($this->logFilePath);
 
             Log::info('workflow: run log directory created', $this->logContext([
-                'log_directory' => $logPath,
+                'log_directory' => $this->logFilePath,
             ]));
         }
 
         $now = now();
 
         $logFileName = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($this->workflowName).'.yaml';
-        $logPath .= DIRECTORY_SEPARATOR.$logFileName;
-        $logData = new WorkflowRunLogData(
+        $this->logFilePath .= DIRECTORY_SEPARATOR.$logFileName;
+        $this->workflowRunLogData = new WorkflowRunLogData(
             parent: $this->parent,
             timestamp: $now->timestamp,
             status: WorkflowStatus::RUNNING,
+            exception: null,
             steps: collect(),
         );
 
         Log::info('workflow: run log initialized', $this->logContext([
-            'log_path' => $logPath,
+            'log_path' => $this->logFilePath,
         ]));
 
         $replacementService = app(VariableReplacementService::class);
@@ -229,7 +234,7 @@ class RunWorkflow implements ShouldQueue
                     'output_preview' => Str::limit($output, 200),
                 ]);
 
-                $logData->appendToSteps(new WorkflowRunLogStepData(
+                $this->workflowRunLogData->appendToSteps(new WorkflowRunLogStepData(
                     name: $step->name,
                     type: $step->type,
                     exitCode: $runProcess->getExitCode(),
@@ -240,7 +245,7 @@ class RunWorkflow implements ShouldQueue
                     run: $step->run,
                     map: null,
                 ));
-                $this->writeLog($logPath, $logData);
+                $this->writeLog();
 
                 if (! $runProcess->isSuccessful()) {
                     $allSuccessful = false;
@@ -299,7 +304,7 @@ class RunWorkflow implements ShouldQueue
                     'keys_written' => array_keys($step->map ?? []),
                 ]);
 
-                $logData->appendToSteps(new WorkflowRunLogStepData(
+                $this->workflowRunLogData->appendToSteps(new WorkflowRunLogStepData(
                     name: $step->name,
                     type: $step->type,
                     exitCode: 0,
@@ -310,7 +315,7 @@ class RunWorkflow implements ShouldQueue
                     run: null,
                     map: $step->map,
                 ));
-                $this->writeLog($logPath, $logData);
+                $this->writeLog();
 
                 Log::info('workflow: step finished', $stepContext);
 
@@ -328,7 +333,7 @@ class RunWorkflow implements ShouldQueue
 
                 // todo: broadcast event??? (workflow started/dispatched only)
             } elseif ($skipReason) {
-                $logData->appendToSteps(new WorkflowRunLogStepData(
+                $this->workflowRunLogData->appendToSteps(new WorkflowRunLogStepData(
                     name: $step->name,
                     type: $step->type,
                     exitCode: 0,
@@ -339,7 +344,7 @@ class RunWorkflow implements ShouldQueue
                     run: $step->run,
                     map: $step->map,
                 ));
-                $this->writeLog($logPath, $logData);
+                $this->writeLog();
 
                 broadcast(new WorkflowStepSkipped(
                     projectUuid: $projectData->uuid,
@@ -362,18 +367,18 @@ class RunWorkflow implements ShouldQueue
         }
 
         if ($allSuccessful) {
-            $logData->status = WorkflowStatus::SUCCESS;
+            $this->workflowRunLogData->status = WorkflowStatus::SUCCESS;
         } else {
-            $logData->status = WorkflowStatus::FAILED;
+            $this->workflowRunLogData->status = WorkflowStatus::FAILED;
         }
 
         Log::info('workflow: run finished', $this->logContext([
-            'status' => $logData->status->value,
+            'status' => $this->workflowRunLogData->status->value,
             'all_successful' => $allSuccessful,
-            'steps_logged' => $logData->steps->count(),
+            'steps_logged' => $this->workflowRunLogData->steps->count(),
         ]));
 
-        $this->writeLog($logPath, $logData);
+        $this->writeLog();
 
         broadcast(new WorkflowFinished(
             projectUuid: $projectData->uuid,
@@ -447,26 +452,42 @@ class RunWorkflow implements ShouldQueue
         return '"'.addcslashes($value, '\\"$').'"';
     }
 
-    protected function writeLog(string $path, WorkflowRunLogData $logData): void
+    protected function writeLog(): void
     {
-        File::put($path, Yaml::dump($logData->toArray(), 10));
+        File::put($this->logFilePath, Yaml::dump($this->workflowRunLogData->toArray(), 10));
     }
 
     public function failed(?Throwable $exception = null): void
     {
-        Log::info('workflow: job failed', $this->logContext([
-            'exception' => $exception?->getMessage(),
-        ]));
+        try {
+            Log::info('workflow: job failed', $this->logContext([
+                'exception' => $exception?->getMessage(),
+            ]));
 
-        $projectService = app(ProjectsService::class);
-        $projectData = $projectService->loadProject($this->projectUuid);
-        $workspaceData = $projectService->loadProjectWorkspace($this->workspacePath);
-        $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::ERROR);
+            $this->workflowRunLogData->exception = $exception?->getMessage();
+            $this->workflowRunLogData->status = WorkflowStatus::FAILED;
+            $this->writeLog();
 
-        Log::info('workflow: workspace status set to error', $this->logContext([
-            'path' => $projectData->path,
-        ]));
+            $projectService = app(ProjectsService::class);
+            $projectData = $projectService->loadProject($this->projectUuid);
+            $workspaceData = $projectService->loadProjectWorkspace($this->workspacePath);
 
-        broadcast(new ProjectDataUpdated($projectData->uuid));
+            broadcast(new WorkflowFinished(
+                projectUuid: $projectData->uuid,
+                workspaceSlugKebab: $workspaceData->slugKebab(),
+                workflowName: $this->workflowName,
+                status: WorkflowStatus::FAILED->value,
+            ));
+
+            $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::ERROR);
+
+            Log::info('workflow: workspace status set to error', $this->logContext([
+                'path' => $projectData->path,
+            ]));
+
+            broadcast(new ProjectDataUpdated($projectData->uuid));
+        } catch (Throwable $exception) {
+            Log::error('workflow: exception while handling failed job', ['exception' => $exception]);
+        }
     }
 }

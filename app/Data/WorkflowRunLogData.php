@@ -18,6 +18,7 @@ class WorkflowRunLogData extends Data
         public int $timestamp,
         #[WithCast(EnumCast::class)]
         public WorkflowStatus $status,
+        public ?string $exception,
         /** @var Collection<int, WorkflowRunLogStepData> */
         public Collection $steps,
     ) {}
