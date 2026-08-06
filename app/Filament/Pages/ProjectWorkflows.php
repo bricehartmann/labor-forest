@@ -80,6 +80,10 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
         ?string $projectUuid = null,
         ?string $workspaceSlugKebab = null,
     ): void {
+        if ($this->project === [] || $this->workspace === []) {
+            return;
+        }
+
         if (
             $projectUuid === $this->projectData->uuid
             && $workspaceSlugKebab === $this->workspaceData->slugKebab()
@@ -111,14 +115,18 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
 
         try {
             $this->project = $projectService->loadProject($uuid)->toArray();
-            $this->workspace = $projectService
-                ->loadProjectWorkspaces($this->projectData->path)
-                ->first(fn (WorkspaceData $workspaceData) => $workspaceData->slugKebab() === $slug)
-                ?->toArray();
 
-            if (! $this->workspace) {
+            $workspaceData = $projectService
+                ->loadProjectWorkspaces($this->projectData->path)
+                ->first(fn (WorkspaceData $workspaceData) => $workspaceData->slugKebab() === $slug);
+
+            if ($workspaceData === null) {
                 $this->redirect(Project::getUrl(['uuid' => $uuid]));
+
+                return;
             }
+
+            $this->workspace = $workspaceData->toArray();
         } catch (Exception $e) {
             $this->loadedInvalidMessage = $e->getMessage();
         }
@@ -141,16 +149,28 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
 
     public function getHeading(): string
     {
+        if ($this->workspace === []) {
+            return 'Workflow Logs';
+        }
+
         return $this->workspaceData->branch;
     }
 
-    public function getSubheading(): string
+    public function getSubheading(): ?string
     {
+        if ($this->project === []) {
+            return null;
+        }
+
         return $this->projectData->dirName();
     }
 
     public function table(Table $table): Table
     {
+        if ($this->workspace === []) {
+            return $table->records(fn () => []);
+        }
+
         return $table
             ->records(fn () => $this->workflowLogData->toArray())
             ->columns([

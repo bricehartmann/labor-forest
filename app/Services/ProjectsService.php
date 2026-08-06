@@ -117,6 +117,7 @@ class ProjectsService
         $newProject = new ProjectData(
             uuid: Str::uuid()->toString(),
             path: $path,
+            last_opened: now()->timestamp,
         );
 
         $projects->push($newProject);
@@ -240,7 +241,7 @@ class ProjectsService
      * @throws ProjectNotFound
      * @throws ProjectDirectoryNotFound
      */
-    public function loadProject(string $uuid): ProjectData
+    public function loadProject(string $uuid, bool $touch = false): ProjectData
     {
         $project = $this->loadProjects()->firstWhere('uuid', $uuid);
 
@@ -249,6 +250,11 @@ class ProjectsService
         }
 
         $this->initializeProjectWorkspaceBaseDirectory($project->path);
+
+        if ($touch) {
+            $project->last_opened = now()->timestamp;
+            $this->updateProject($project);
+        }
 
         return $project;
     }
@@ -409,7 +415,7 @@ class ProjectsService
             }
         }
 
-        if ($problems !== []) {
+        if ($problems) {
             throw InvalidProjectsFile::withProblems($path, $problems);
         }
 

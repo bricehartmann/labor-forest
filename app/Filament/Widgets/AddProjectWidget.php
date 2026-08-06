@@ -21,6 +21,8 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
     use InteractsWithActions;
     use InteractsWithSchemas;
 
+    protected static ?int $sort = 1;
+
     protected string $view = 'filament.widgets.add-project-widget';
 
     public function addProjectAction(): Action

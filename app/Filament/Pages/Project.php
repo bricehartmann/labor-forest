@@ -86,6 +86,10 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     #[On('native:'.ProjectDataUpdated::class)]
     public function onProjectDataUpdated(?string $projectUuid = null): void
     {
+        if ($this->project === []) {
+            return;
+        }
+
         if ($projectUuid === $this->projectData->uuid) {
             $this->reloadData();
         }
@@ -126,7 +130,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         $projectService = app(ProjectsService::class);
 
         try {
-            $this->project = $projectService->loadProject($uuid)->toArray();
+            $this->project = $projectService->loadProject($uuid, touch: true)->toArray();
             $this->workspaces = $projectService->loadProjectWorkspaces($this->projectData->path)->toArray();
             $this->workflows = $this->loadWorkspaceWorkflows();
         } catch (Exception $e) {
@@ -199,6 +203,10 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
     public function getHeading(): string
     {
+        if ($this->project === []) {
+            return 'Project';
+        }
+
         return $this->projectData->dirName();
     }
 
@@ -428,6 +436,10 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
     public function table(Table $table): Table
     {
+        if ($this->project === []) {
+            return $table->records(fn () => []);
+        }
+
         $settings = app(SettingsService::class)->loadSettings();
 
         return $table

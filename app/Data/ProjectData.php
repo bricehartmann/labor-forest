@@ -11,6 +11,7 @@ class ProjectData extends Data
     public function __construct(
         public string $uuid,
         public string $path,
+        public int $last_opened,
         public ?string $command_launch_ide = null,
         public ?string $command_launch_browser = null,
         public ?string $command_launch_terminal = null,
@@ -41,6 +42,7 @@ class ProjectData extends Data
         return [
             'uuid' => ['required', 'uuid'],
             'path' => ['required', 'string'],
+            'last_opened' => ['required', 'integer'],
             'command_launch_ide' => [
                 'nullable',
                 'string',
