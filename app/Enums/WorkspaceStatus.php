@@ -7,6 +7,7 @@ use Filament\Support\Contracts\HasLabel;
 
 enum WorkspaceStatus: string implements HasColor, HasLabel
 {
+    case PENDING = 'pending';
     case READY = 'ready';
     case WORKING = 'working';
     case SUSPENDED = 'suspended';
@@ -23,6 +24,7 @@ enum WorkspaceStatus: string implements HasColor, HasLabel
         return match ($this) {
             self::READY => 'success',
             self::WORKING => 'warning',
+            self::PENDING => 'info',
             self::SUSPENDED, self::UNKNOWN => 'gray',
             self::ERROR => 'danger',
         };

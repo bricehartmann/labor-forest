@@ -8,13 +8,13 @@ use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\FileExtension;
 use App\Enums\WorkflowStatus;
+use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
 use App\Jobs\RunWorkflow;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Finder\SplFileInfo;
@@ -50,12 +50,11 @@ class WorkflowService
         string $workflowName,
         ?string $parentWorkflowName,
         WorkflowStatus $status,
-    ): WorkflowRunLogData
-    {
+    ): WorkflowRunLogData {
         $now = Carbon::createFromTimestampUTC($timestamp);
         $logFileId = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($workflowName);
 
-       return new WorkflowRunLogData(
+        return new WorkflowRunLogData(
             id: $logFileId,
             name: $workflowName,
             parent: $parentWorkflowName,
@@ -70,6 +69,7 @@ class WorkflowService
     {
         $projectService = app(ProjectsService::class);
         $workspaceData = $projectService->loadProjectWorkspace($workspacePath);
+        $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::PENDING);
         $timestamp = now()->timestamp;
         $workflowRunLogData = $this->workflowRunLogData(
             timestamp: $timestamp,
