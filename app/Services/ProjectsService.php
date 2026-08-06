@@ -419,6 +419,6 @@ class ProjectsService
             throw InvalidProjectsFile::withProblems($path, $problems);
         }
 
-        return $projects;
+        return $projects->sortBy('last_opened');
     }
 }
