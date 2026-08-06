@@ -290,7 +290,7 @@ class RunWorkflow implements ShouldQueue
                 ]);
 
                 $runProcess = Process::fromShellCommandline(
-                    command: $command,
+                    command: $this->strictShellCommand($command),
                     cwd: $workspaceData->path,
                     env: $env,
                 );
@@ -454,6 +454,17 @@ class RunWorkflow implements ShouldQueue
         }
 
         return $allSuccessful;
+    }
+
+    /**
+     * Wrap a shell step's command so a failure anywhere within it surfaces as a non-zero exit code.
+     *
+     * Without this, only the final command in a chain decides the step's fate: `false; echo ok`
+     * exits 0. `pipefail` is guarded because it exists in bash-as-sh but not in dash.
+     */
+    protected function strictShellCommand(string $command): string
+    {
+        return 'set -eu; set -o pipefail 2>/dev/null || true; '.$command;
     }
 
     /**
