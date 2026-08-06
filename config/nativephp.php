@@ -160,6 +160,27 @@ return [
             'sleep' => 3,
             'tries' => 1,
         ],
+        'default2' => [
+            'queues' => ['default'],
+            'memory_limit' => 128,
+            'timeout' => null,
+            'sleep' => 3,
+            'tries' => 1,
+        ],
+        'default3' => [
+            'queues' => ['default'],
+            'memory_limit' => 128,
+            'timeout' => null,
+            'sleep' => 3,
+            'tries' => 1,
+        ],
+        'default4' => [
+            'queues' => ['default'],
+            'memory_limit' => 128,
+            'timeout' => null,
+            'sleep' => 3,
+            'tries' => 1,
+        ],
     ],
 
     /**

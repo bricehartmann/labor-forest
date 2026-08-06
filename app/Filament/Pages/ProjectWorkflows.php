@@ -166,7 +166,7 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
                     ->size(TextSize::Large),
             ])
             ->selectable()
-            ->checkIfRecordIsSelectableUsing(fn (array $record) => WorkflowStatus::from($record['status']) !== WorkflowStatus::RUNNING)
+            ->checkIfRecordIsSelectableUsing(fn (array $record) => ! WorkflowStatus::from($record['status'])->isLocked())
             ->filters([
                 // ...
             ])

@@ -45,7 +45,7 @@ class RunWorkflow implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null, public int $timeout = 0)
+    public function __construct(public int $timestamp, public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null, public int $timeout = 0)
     {
         //
     }
@@ -85,36 +85,18 @@ class RunWorkflow implements ShouldQueue
 
         Log::info('workflow: workspace status set to working', $this->logContext());
 
-        $this->logFilePath = implode(DIRECTORY_SEPARATOR, [
-            $workspaceData->path,
-            Directory::BASE->value,
-            Directory::IGNORED->value,
-            Directory::LOGS->value,
-        ]);
+        $workflowService = app(WorkflowService::class);
 
-        if (! File::exists($this->logFilePath)) {
-            File::makeDirectory($this->logFilePath);
-
-            Log::info('workflow: run log directory created', $this->logContext([
-                'log_directory' => $this->logFilePath,
-            ]));
-        }
-
-        $now = now();
-
-        $logFileId = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($this->workflowName);
-        $logFileName = $logFileId.'.'.FileExtension::YAML->value;
-        $this->logFilePath .= DIRECTORY_SEPARATOR.$logFileName;
-        $this->workflowRunLogData = new WorkflowRunLogData(
-            id: $logFileId,
-            name: $this->workflowName,
-            parent: $this->parent,
-            timestamp: $now->timestamp,
+        $this->workflowRunLogData = $workflowService->workflowRunLogData(
+            timestamp: $this->timestamp,
+            workspaceData: $workspaceData,
+            workflowName: $this->workflowName,
+            parentWorkflowName: $this->parent,
             status: WorkflowStatus::RUNNING,
-            exception: null,
-            steps: collect(),
         );
-        $this->writeLog();
+        $logFileName = $this->workflowRunLogData->id.'.'.FileExtension::YAML->value;
+        $this->logFilePath = $workflowService->ensureLogFilePathDirectoryExists($workspaceData->path).DIRECTORY_SEPARATOR.$logFileName;
+        $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
 
         Log::info('workflow: run log initialized', $this->logContext([
             'log_path' => $this->logFilePath,
@@ -149,7 +131,7 @@ class RunWorkflow implements ShouldQueue
             'steps_logged' => $this->workflowRunLogData->steps->count(),
         ]));
 
-        $this->writeLog();
+        $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
 
         broadcast(new WorkflowFinished(
             projectUuid: $projectData->uuid,
@@ -292,6 +274,8 @@ class RunWorkflow implements ShouldQueue
                 }
             }
 
+            $workflowService = app(WorkflowService::class);
+
             if (! $skipReason && $step->type === WorkflowStepType::SHELL) {
                 $output = '';
 
@@ -347,7 +331,7 @@ class RunWorkflow implements ShouldQueue
                     run: $step->run,
                     map: null,
                 ));
-                $this->writeLog();
+                $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
 
                 if (! $runProcess->isSuccessful()) {
                     $allSuccessful = false;
@@ -418,7 +402,7 @@ class RunWorkflow implements ShouldQueue
                     run: null,
                     map: $step->map,
                 ));
-                $this->writeLog();
+                $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
 
                 Log::info('workflow: step finished', $stepContext);
 
@@ -448,7 +432,7 @@ class RunWorkflow implements ShouldQueue
                     run: $step->run,
                     map: $step->map,
                 ));
-                $this->writeLog();
+                $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
 
                 broadcast(new WorkflowStepSkipped(
                     projectUuid: $projectData->uuid,
@@ -535,11 +519,6 @@ class RunWorkflow implements ShouldQueue
         }
 
         return '"'.addcslashes($value, '\\"$').'"';
-    }
-
-    protected function writeLog(): void
-    {
-        File::put($this->logFilePath, Yaml::dump($this->workflowRunLogData->toArray(), 10));
     }
 
     public function failed(?Throwable $exception = null): void

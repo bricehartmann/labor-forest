@@ -557,6 +557,8 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                             parent: null,
                                             timeoutSeconds: $settings->workflow_timeout_seconds,
                                         );
+
+                                        $this->reloadData();
                                     },
                                     successTitle: Str::headline($name).' workflow started',
                                     failureBody: fn (Throwable $th) => $th->getMessage(),

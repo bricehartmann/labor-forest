@@ -7,11 +7,15 @@ use App\Data\WorkflowRunLogData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\FileExtension;
+use App\Enums\WorkflowStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
 use App\Jobs\RunWorkflow;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Finder\SplFileInfo;
 use Symfony\Component\Yaml\Exception\ParseException;
@@ -19,9 +23,66 @@ use Symfony\Component\Yaml\Yaml;
 
 class WorkflowService
 {
+    public function ensureLogFilePathDirectoryExists(string $workspacePath): string
+    {
+        $path = implode(DIRECTORY_SEPARATOR, [
+            $workspacePath,
+            Directory::BASE->value,
+            Directory::IGNORED->value,
+            Directory::LOGS->value,
+        ]);
+
+        if (! File::exists($path)) {
+            File::makeDirectory($path);
+        }
+
+        return $path;
+    }
+
+    public function writeWorkflowLogData(string $logFilePath, WorkflowRunLogData $workflowRunLogData): void
+    {
+        File::put($logFilePath, Yaml::dump($workflowRunLogData->toArray(), 10));
+    }
+
+    public function workflowRunLogData(
+        int $timestamp,
+        WorkspaceData $workspaceData,
+        string $workflowName,
+        ?string $parentWorkflowName,
+        WorkflowStatus $status,
+    ): WorkflowRunLogData
+    {
+        $now = Carbon::createFromTimestampUTC($timestamp);
+        $logFileId = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($workflowName);
+
+       return new WorkflowRunLogData(
+            id: $logFileId,
+            name: $workflowName,
+            parent: $parentWorkflowName,
+            timestamp: $timestamp,
+            status: $status,
+            exception: null,
+            steps: collect(),
+        );
+    }
+
     public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parent, int $timeoutSeconds): void
     {
-        dispatch(new RunWorkflow($projectUuid, $workspacePath, $workflowName, $stepHashes, $parent, $timeoutSeconds));
+        $projectService = app(ProjectsService::class);
+        $workspaceData = $projectService->loadProjectWorkspace($workspacePath);
+        $timestamp = now()->timestamp;
+        $workflowRunLogData = $this->workflowRunLogData(
+            timestamp: $timestamp,
+            workspaceData: $workspaceData,
+            workflowName: $workflowName,
+            parentWorkflowName: $parent,
+            status: WorkflowStatus::PENDING,
+        );
+        $logFileName = $workflowRunLogData->id.'.'.FileExtension::YAML->value;
+        $logFilePath = $this->ensureLogFilePathDirectoryExists($workspaceData->path).DIRECTORY_SEPARATOR.$logFileName;
+        $this->writeWorkflowLogData($logFilePath, $workflowRunLogData);
+
+        dispatch(new RunWorkflow($timestamp, $projectUuid, $workspacePath, $workflowName, $stepHashes, $parent, $timeoutSeconds));
     }
 
     /**
