@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Concerns\Filament\Widgets\HasProjectsLoadError;
 use App\Enums\SessionKey;
 use App\Filament\Pages\Project;
 use App\Services\ProjectsService;
@@ -17,6 +18,7 @@ use Throwable;
 
 class AddProjectWidget extends Widget implements HasActions, HasSchemas
 {
+    use HasProjectsLoadError;
     use HasResultNotificationOperations;
     use InteractsWithActions;
     use InteractsWithSchemas;
@@ -24,6 +26,11 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
     protected static ?int $sort = 1;
 
     protected string $view = 'filament.widgets.add-project-widget';
+
+    public static function canView(): bool
+    {
+        return blank(static::projectsLoadErrorMessage());
+    }
 
     public function addProjectAction(): Action
     {

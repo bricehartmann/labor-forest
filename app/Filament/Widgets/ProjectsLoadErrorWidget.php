@@ -2,12 +2,13 @@
 
 namespace App\Filament\Widgets;
 
-use App\Services\ProjectsService;
+use App\Concerns\Filament\Widgets\HasProjectsLoadError;
 use Filament\Widgets\Widget;
-use Throwable;
 
 class ProjectsLoadErrorWidget extends Widget
 {
+    use HasProjectsLoadError;
+
     protected string $view = 'filament.widgets.projects-load-error-widget';
 
     protected static ?int $sort = 0;
@@ -24,16 +25,5 @@ class ProjectsLoadErrorWidget extends Widget
     public static function canView(): bool
     {
         return filled(static::projectsLoadErrorMessage());
-    }
-
-    protected static function projectsLoadErrorMessage(): ?string
-    {
-        try {
-            app(ProjectsService::class)->loadProjects();
-
-            return null;
-        } catch (Throwable $th) {
-            return $th->getMessage();
-        }
     }
 }
