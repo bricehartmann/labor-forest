@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Data\WorkflowData;
+use App\Data\WorkflowRunLogData;
+use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\FileExtension;
 use App\Enums\YamlResourceType;
@@ -67,6 +69,40 @@ class WorkflowService
             ->filter()
             ->reject(fn (WorkflowData $data) => $data->steps->isEmpty())
             ->sortBy(fn (WorkflowData $data) => $data->sort_order);
+    }
+
+    /**
+     * Read the run logs written by RunWorkflow for a single workspace.
+     *
+     * Unparseable or malformed logs are skipped rather than throwing: logs are machine-written
+     * runtime artifacts flushed incrementally while a workflow is still running.
+     *
+     * @return Collection<int, WorkflowRunLogData> newest run first
+     */
+    public function loadWorkflowLogData(WorkspaceData $workspaceData): Collection
+    {
+        $logsPath = implode(DIRECTORY_SEPARATOR, [
+            $workspaceData->path,
+            Directory::BASE->value,
+            Directory::IGNORED->value,
+            Directory::LOGS->value,
+        ]);
+
+        if (! File::isDirectory($logsPath)) {
+            return collect();
+        }
+
+        $fileNamePattern = '/^\d{8}T\d{6}Z_'.preg_quote($workspaceData->slugKebab(), '/').'_.+$/';
+
+        return collect(File::files($logsPath))
+            ->reject(fn (SplFileInfo $file) => $file->getExtension() !== FileExtension::YAML->value)
+            ->filter(fn (SplFileInfo $file) => preg_match($fileNamePattern, $file->getFilenameWithoutExtension()) === 1)
+            ->map(fn (SplFileInfo $file) => rescue(fn () => Yaml::parseFile($file->getPathname())))
+            ->filter(fn ($yaml) => is_array($yaml) && ($yaml['resource_type'] ?? null) === YamlResourceType::WORKFLOW_RUN_LOG->value)
+            ->map(fn (array $yaml) => rescue(fn () => WorkflowRunLogData::from($yaml)))
+            ->filter()
+            ->sortByDesc(fn (WorkflowRunLogData $data) => $data->timestamp)
+            ->values();
     }
 
     /**

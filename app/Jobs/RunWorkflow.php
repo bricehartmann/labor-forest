@@ -17,6 +17,7 @@ use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Events\ProjectDataUpdated;
 use App\Events\WorkflowFinished;
+use App\Events\WorkflowStarted;
 use App\Events\WorkflowStepFinished;
 use App\Events\WorkflowStepOutputUpdated;
 use App\Events\WorkflowStepSkipped;
@@ -101,19 +102,29 @@ class RunWorkflow implements ShouldQueue
 
         $now = now();
 
-        $logFileName = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($this->workflowName).'.yaml';
+        $logFileId = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($this->workflowName);
+        $logFileName = $logFileId.'.'.FileExtension::YAML->value;
         $this->logFilePath .= DIRECTORY_SEPARATOR.$logFileName;
         $this->workflowRunLogData = new WorkflowRunLogData(
+            id: $logFileId,
+            name: $this->workflowName,
             parent: $this->parent,
             timestamp: $now->timestamp,
             status: WorkflowStatus::RUNNING,
             exception: null,
             steps: collect(),
         );
+        $this->writeLog();
 
         Log::info('workflow: run log initialized', $this->logContext([
             'log_path' => $this->logFilePath,
         ]));
+
+        broadcast(new WorkflowStarted(
+            projectUuid: $projectData->uuid,
+            workspaceSlugKebab: $workspaceData->slugKebab(),
+            workflowName: $this->workflowName,
+        ));
 
         try {
             $allSuccessful = $this->runSteps($workflowData, $projectData, $workspaceData);

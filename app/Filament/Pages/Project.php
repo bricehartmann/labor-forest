@@ -17,7 +17,6 @@ use App\Enums\WorkflowKnownName;
 use App\Enums\WorkspaceStatus;
 use App\Events\ProjectDataUpdated;
 use App\Exceptions\GitOperationFailed;
-use App\Exceptions\InvalidProjectsFile;
 use App\Rules\ValidVariables;
 use App\Services\GitService;
 use App\Services\LaunchService;
@@ -130,8 +129,6 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             $this->project = $projectService->loadProject($uuid)->toArray();
             $this->workspaces = $projectService->loadProjectWorkspaces($this->projectData->path)->toArray();
             $this->workflows = $this->loadWorkspaceWorkflows();
-        } catch (InvalidProjectsFile $e) {
-            $this->loadedInvalidMessage = $e->messagesAsString();
         } catch (Exception $e) {
             $this->loadedInvalidMessage = $e->getMessage();
         }
@@ -172,6 +169,27 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->sortBy(fn (int $sortOrder, string $name) => [$sortOrder, $name])
             ->keys()
             ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $record
+     */
+    protected function isWorkflowActionDisabled(array $record, string $name): bool
+    {
+        $status = WorkspaceStatus::from($record['status']);
+
+        if (! $status->ableToRunWorkflow()) {
+            return true;
+        }
+
+        if (! array_key_exists($name, $this->workflows[$record['path']] ?? [])) {
+            return true;
+        }
+
+        $requiredStatus = WorkflowKnownName::tryFrom($name)?->requiredWorkspaceStatus();
+
+        return $requiredStatus !== null
+            && $record['status'] !== $requiredStatus->value;
     }
 
     public static function getSlug($panel = null): string
@@ -505,23 +523,10 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ...collect($this->workflowNames())
                         ->map(fn (string $name) => Action::make('workflow_'.$name)
                             ->label(Str::headline($name))
-                            ->icon(Heroicon::Play)
-                            ->hidden(function (array $record) use ($name) {
-                                $status = WorkspaceStatus::from($record['status']);
-
-                                if (! $status->ableToRunWorkflow()) {
-                                    return true;
-                                }
-
-                                if (! array_key_exists($name, $this->workflows[$record['path']] ?? [])) {
-                                    return true;
-                                }
-
-                                $requiredStatus = WorkflowKnownName::tryFrom($name)?->requiredWorkspaceStatus();
-
-                                return $requiredStatus !== null
-                                    && $record['status'] !== $requiredStatus->value;
-                            })
+                            ->icon(fn (array $record) => $this->isWorkflowActionDisabled($record, $name)
+                                ? Heroicon::XMark
+                                : Heroicon::Play)
+                            ->disabled(fn (array $record) => $this->isWorkflowActionDisabled($record, $name))
                             ->modal()
                             ->modalHeading('Run '.Str::headline($name).' Workflow')
                             ->modalDescription('Select which steps in the workflow you would like to run.')
@@ -562,6 +567,11 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->button()
                     ->label('Workflows')
                     ->color('success'),
+                Action::make('logs')
+                    ->button()
+                    ->label('Logs')
+                    ->color('info')
+                    ->url(fn (array $record) => ProjectWorkflows::getUrl(['uuid' => $this->projectData->uuid, 'slug' => WorkspaceData::from($record)->slugKebab()])),
                 ActionGroup::make([
                     Action::make('override_status')
                         ->label('Override status')

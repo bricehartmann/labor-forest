@@ -14,6 +14,8 @@ use Spatie\LaravelData\Support\Transformation\TransformationContextFactory;
 class WorkflowRunLogData extends Data
 {
     public function __construct(
+        public string $id,
+        public string $name,
         public ?string $parent,
         public int $timestamp,
         #[WithCast(EnumCast::class)]
