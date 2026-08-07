@@ -420,7 +420,6 @@ class RunWorkflow implements ShouldQueue
                 ]);
 
                 $contents = File::get($envPath);
-                $written = [];
 
                 foreach ($step->map ?? [] as $envKey => $envValue) {
                     $value = $this->escapeEnvValue($replacementService->replace(
@@ -430,7 +429,6 @@ class RunWorkflow implements ShouldQueue
                     ));
 
                     $contents = $this->setEnvValue($contents, $envKey, $value);
-                    $written[] = $envKey.'='.$value;
                 }
 
                 File::put($envPath, $contents);
