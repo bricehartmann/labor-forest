@@ -188,6 +188,7 @@ return [
      */
     'prebuild' => [
         'npm run build',
+        'php artisan app:patch-mac-entitlements',
     ],
 
     'postbuild' => [
