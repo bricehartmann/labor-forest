@@ -13,7 +13,6 @@ use App\Enums\GitStatus;
 use App\Enums\Regex;
 use App\Enums\SessionKey;
 use App\Enums\Variable;
-use App\Enums\WorkflowKnownName;
 use App\Enums\WorkspaceStatus;
 use App\Events\ProjectDataUpdated;
 use App\Exceptions\GitOperationFailed;
@@ -139,7 +138,9 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     }
 
     /**
-     * @return array<string, array<string, int>> workspace path => (workflow name => sort order)
+     * Workspace path => (workflow name => workflow gating data).
+     *
+     * @return array<string, array<string, array{sort_order: int, require_status: string|null}>>
      */
     protected function loadWorkspaceWorkflows(): array
     {
@@ -148,7 +149,10 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         return collect($this->workspaces)
             ->mapWithKeys(fn (array $workspace) => [
                 $workspace['path'] => $workflowService->loadWorkflows($workspace['path'])
-                    ->map(fn (WorkflowData $workflowData) => $workflowData->sort_order)
+                    ->map(fn (WorkflowData $workflowData) => [
+                        'sort_order' => $workflowData->sort_order,
+                        'require_status' => $workflowData->require_status?->value,
+                    ])
                     ->all(),
             ])
             ->all();
@@ -162,8 +166,8 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     protected function workflowNames(): array
     {
         $sortOrders = collect($this->workflows)->reduce(function (array $carry, array $workflows) {
-            foreach ($workflows as $name => $sortOrder) {
-                $carry[$name] = min($carry[$name] ?? $sortOrder, $sortOrder);
+            foreach ($workflows as $name => $workflow) {
+                $carry[$name] = min($carry[$name] ?? $workflow['sort_order'], $workflow['sort_order']);
             }
 
             return $carry;
@@ -186,14 +190,16 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             return true;
         }
 
-        if (! array_key_exists($name, $this->workflows[$record['path']] ?? [])) {
+        $workflow = $this->workflows[$record['path']][$name] ?? null;
+
+        if ($workflow === null) {
             return true;
         }
 
-        $requiredStatus = WorkflowKnownName::tryFrom($name)?->requiredWorkspaceStatus();
+        $requiredStatus = $workflow['require_status'] ?? null;
 
         return $requiredStatus !== null
-            && $record['status'] !== $requiredStatus->value;
+            && $record['status'] !== $requiredStatus;
     }
 
     public static function getSlug($panel = null): string

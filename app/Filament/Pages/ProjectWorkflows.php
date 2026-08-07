@@ -180,7 +180,8 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
                     ->formatStateUsing(fn ($state) => Carbon::createFromTimestampUTC($state)->tz($this->timezone)->format('Y-m-d H:i:s T'))
                     ->sortable(),
                 TextColumn::make('name')
-                    ->label('Workflow'),
+                    ->label('Workflow')
+                    ->formatStateUsing(fn ($state) => ucwords($state)),
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()
@@ -229,6 +230,7 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
                     }),
             ])
             ->emptyStateHeading('No log data')
+            ->defaultSort('timestamp', 'desc')
             ->paginated();
     }
 }

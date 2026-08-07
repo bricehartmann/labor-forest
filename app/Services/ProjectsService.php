@@ -336,6 +336,8 @@ class ProjectsService
                 run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env'
             );
             $workflowUp = new WorkflowData(
+                require_status: WorkspaceStatus::SUSPENDED,
+                ending_status: WorkspaceStatus::READY,
                 sort_order: 0,
                 steps: collect([$stepCopyEnv]),
             );
@@ -347,6 +349,8 @@ class ProjectsService
 
         if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowDown)) {
             $workflowDown = new WorkflowData(
+                require_status: WorkspaceStatus::READY,
+                ending_status: WorkspaceStatus::SUSPENDED,
                 sort_order: 100,
                 steps: collect(),
             );

@@ -10,7 +10,6 @@ use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\File as FileName;
 use App\Enums\FileExtension;
-use App\Enums\WorkflowKnownName;
 use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
@@ -150,9 +149,7 @@ class RunWorkflow implements ShouldQueue
 
         $finalStatus = match (true) {
             ! $allSuccessful => WorkspaceStatus::ERROR,
-            $this->workflowName === WorkflowKnownName::DOWN->value => WorkspaceStatus::SUSPENDED,
-            $this->workflowName === WorkflowKnownName::UP->value => WorkspaceStatus::READY,
-            default => $currentStatus,
+            default => $workflowData->ending_status ?? $currentStatus,
         };
 
         Log::info('workflow: resolving workspace status', $this->logContext([
