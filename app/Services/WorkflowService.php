@@ -46,23 +46,21 @@ class WorkflowService
      * Build a run log seeded with a pending entry for every step of the workflow, so the log
      * lists the steps still to come rather than only the ones that have already run.
      *
+     * @param  ?string  $parentLogId  the run log id of the workflow that started this one, when chained
      * @param  Collection<int, WorkflowStepData>  $workflowSteps
      */
     public function workflowRunLogData(
         int $timestamp,
         WorkspaceData $workspaceData,
         string $workflowName,
-        ?string $parentWorkflowName,
+        ?string $parentLogId,
         WorkflowStatus $status,
         Collection $workflowSteps,
     ): WorkflowRunLogData {
-        $now = Carbon::createFromTimestampUTC($timestamp);
-        $logFileId = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($workflowName);
-
         return new WorkflowRunLogData(
-            id: $logFileId,
+            id: $this->runLogId($workspaceData, $timestamp, $workflowName),
             name: $workflowName,
-            parent: $parentWorkflowName,
+            parent: $parentLogId,
             timestamp: $timestamp,
             status: $status,
             exception: null,
@@ -73,20 +71,50 @@ class WorkflowService
     }
 
     /**
+     * Build the id identifying a run, which doubles as the name of its log file.
+     */
+    public function runLogId(WorkspaceData $workspaceData, int $timestamp, string $workflowName): string
+    {
+        return Carbon::createFromTimestampUTC($timestamp)->format('Ymd\THis\Z')
+            .'_'.$workspaceData->slugKebab()
+            .'_'.Str::slug($workflowName);
+    }
+
+    /**
+     * Move the given timestamp forward until no run log exists for the id it would produce.
+     *
+     * A run is identified by its timestamp, workspace and workflow name, so a workflow starting
+     * the same child twice within one second would otherwise overwrite the first child's log.
+     *
+     * Only call this when creating a run: RunWorkflow rebuilds its log data from the timestamp
+     * it was constructed with and has to derive the same id it was dispatched under.
+     */
+    public function availableLogTimestamp(WorkspaceData $workspaceData, string $workflowName, int $timestamp): int
+    {
+        $logsPath = $this->logsPath($workspaceData->path);
+
+        while (File::isFile($logsPath.DIRECTORY_SEPARATOR.$this->runLogId($workspaceData, $timestamp, $workflowName).'.'.FileExtension::YAML->value)) {
+            $timestamp++;
+        }
+
+        return $timestamp;
+    }
+
+    /**
      * @throws InvalidWorkflowFile
      * @throws WorkspaceNotFound
      */
-    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parent, int $timeoutSeconds): string
+    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parentLogId, int $timeoutSeconds): string
     {
         $projectService = app(ProjectsService::class);
         $workspaceData = $projectService->loadProjectWorkspace($workspacePath);
         $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::PENDING);
-        $timestamp = now()->timestamp;
+        $timestamp = $this->availableLogTimestamp($workspaceData, $workflowName, now()->timestamp);
         $workflowRunLogData = $this->workflowRunLogData(
             timestamp: $timestamp,
             workspaceData: $workspaceData,
             workflowName: $workflowName,
-            parentWorkflowName: $parent,
+            parentLogId: $parentLogId,
             status: WorkflowStatus::PENDING,
             workflowSteps: $this->loadSteps($workspacePath, $workflowName),
         );
@@ -94,7 +122,7 @@ class WorkflowService
         $logFilePath = $this->ensureLogFilePathDirectoryExists($workspaceData->path).DIRECTORY_SEPARATOR.$logFileName;
         $this->writeWorkflowLogData($logFilePath, $workflowRunLogData);
 
-        dispatch(new RunWorkflow($timestamp, $projectUuid, $workspacePath, $workflowName, $stepHashes, $parent, $timeoutSeconds));
+        dispatch(new RunWorkflow($timestamp, $projectUuid, $workspacePath, $workflowName, $stepHashes, $parentLogId, $timeoutSeconds));
 
         return $workflowRunLogData->id;
     }

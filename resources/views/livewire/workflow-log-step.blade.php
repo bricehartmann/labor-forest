@@ -45,6 +45,16 @@
                          <td class="border border-slate-300 px-3 py-2 w-full"><code>{{ $this->stepData->run }}</code></td>
                      </tr>
                     @endif
+                    @if($this->stepData->log_id !== null)
+                     <tr>
+                         <td class="border border-slate-300 px-3 py-2 whitespace-nowrap">CHILD RUN</td>
+                         <td class="border border-slate-300 px-3 py-2 w-full">
+                             <x-filament::link :href="\App\Filament\Pages\WorkflowLog::getUrl(['uuid' => $this->uuid, 'slug' => $this->slug, 'id' => $this->stepData->log_id])">
+                                 <code>{{ $this->stepData->log_id }}</code>
+                             </x-filament::link>
+                         </td>
+                     </tr>
+                    @endif
                     @if($this->stepData->env !== null)
                      <tr>
                          <td class="border border-slate-300 px-3 py-2 whitespace-nowrap">ENV</td>

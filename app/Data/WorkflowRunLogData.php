@@ -17,6 +17,7 @@ class WorkflowRunLogData extends Data
     public function __construct(
         public string $id,
         public string $name,
+        /** The run log id of the workflow that started this one, when it was started by a workflow step. */
         public ?string $parent,
         public int $timestamp,
         #[WithCast(EnumCast::class)]

@@ -6,6 +6,7 @@ use App\Data\ProjectData;
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\File as FileName;
@@ -48,8 +49,11 @@ class RunWorkflow implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  ?string  $parent  the run log id of the workflow that started this one, when chained
+     * @param  array<int, string>  $ancestorWorkflowNames  the names of the workflows above this one in the chain
      */
-    public function __construct(public int $timestamp, public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null, public int $timeout = 0)
+    public function __construct(public int $timestamp, public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null, public int $timeout = 0, public array $ancestorWorkflowNames = [])
     {
         //
     }
@@ -95,7 +99,7 @@ class RunWorkflow implements ShouldQueue
             timestamp: $this->timestamp,
             workspaceData: $workspaceData,
             workflowName: $this->workflowName,
-            parentWorkflowName: $this->parent,
+            parentLogId: $this->parent,
             status: WorkflowStatus::RUNNING,
             workflowSteps: $workflowData->steps,
         );
@@ -443,30 +447,131 @@ class RunWorkflow implements ShouldQueue
                     stepHash: $stepHash,
                     status: WorkflowStatus::SUCCESS->value,
                 ));
-            } else {
-                // WorkflowStepType::WORKFLOW, plus any type added without a branch here
+            } elseif ($step->type === WorkflowStepType::WORKFLOW) {
+                $childSuccessful = $this->runChildWorkflow($step, $logStep, $projectData, $workspaceData, $stepContext);
 
-                // todo: dispatch workflow ???
+                if (! $childSuccessful) {
+                    $allSuccessful = false;
 
-                // todo: broadcast event??? (workflow started/dispatched only)
+                    Log::info('workflow: child workflow failed, aborting workflow', $stepContext);
 
-                Log::info('workflow: step type is not implemented, skipping', $stepContext);
+                    // no need to broadcast WorkflowStepFinished because it will be picked up on data refresh from WorkflowFinished event
 
-                $logStep->skip_reason = WorkflowStepSkipReason::NOT_IMPLEMENTED;
-                $logStep->ended_timestamp = now()->timestamp;
-                $this->flushRunLog();
+                    break;
+                }
 
-                broadcast(new WorkflowStepSkipped(
+                Log::info('workflow: step finished', $stepContext);
+
+                broadcast(new WorkflowStepFinished(
                     projectUuid: $projectData->uuid,
                     workspaceSlugKebab: $workspaceData->slugKebab(),
                     workflowName: $this->workflowName,
                     stepHash: $stepHash,
-                    reason: WorkflowStepSkipReason::NOT_IMPLEMENTED->value,
+                    status: WorkflowStatus::SUCCESS->value,
                 ));
             }
         }
 
         return $allSuccessful;
+    }
+
+    /**
+     * Run the workflow named by a workflow step and report whether it succeeded.
+     *
+     * The child runs inline rather than being queued so this step only finishes once the child
+     * has, letting a chained workflow fail the workflow that started it. It writes its own run
+     * log, linked to this one, and is never subjected to the require_status gate that guards a
+     * workflow launched by hand.
+     *
+     * @param  array<string, mixed>  $stepContext
+     */
+    protected function runChildWorkflow(WorkflowStepData $step, WorkflowRunLogStepData $logStep, ProjectData $projectData, WorkspaceData $workspaceData, array $stepContext): bool
+    {
+        $workflowService = app(WorkflowService::class);
+
+        $childWorkflowName = trim(app(VariableReplacementService::class)->replace(
+            projectData: $projectData,
+            workspaceData: $workspaceData,
+            content: (string) $step->run,
+        ));
+
+        $chain = [...$this->ancestorWorkflowNames, $this->workflowName];
+
+        if (in_array($childWorkflowName, $chain, true)) {
+            return $this->failChildWorkflowStep(
+                $logStep,
+                'Workflow ['.$childWorkflowName.'] is already running in this chain: '.implode(' > ', $chain).'.',
+                $stepContext,
+            );
+        }
+
+        Log::info('workflow: starting child workflow', [
+            ...$stepContext,
+            'child_workflow_name' => $childWorkflowName,
+        ]);
+
+        try {
+            $childSteps = $workflowService->loadSteps($this->workspacePath, $childWorkflowName);
+
+            $child = new self(
+                timestamp: $workflowService->availableLogTimestamp($workspaceData, $childWorkflowName, now()->timestamp),
+                projectUuid: $this->projectUuid,
+                workspacePath: $this->workspacePath,
+                workflowName: $childWorkflowName,
+                stepHashes: $childSteps
+                    ->values()
+                    ->map(fn (WorkflowStepData $childStep, int $index) => $childStep->hash((string) $index))
+                    ->all(),
+                parent: $this->workflowRunLogData->id,
+                timeout: $this->timeout,
+                ancestorWorkflowNames: $chain,
+            );
+
+            $child->handle();
+        } catch (Throwable $throwable) {
+            // the child writes its log before it runs a step, so a throw part way through still leaves one to link to
+            $logStep->log_id = ($child ?? null)?->workflowRunLogData?->id;
+
+            return $this->failChildWorkflowStep($logStep, $throwable->getMessage(), $stepContext);
+        }
+
+        $childRunLogData = $child->workflowRunLogData;
+        $successful = $childRunLogData?->status === WorkflowStatus::SUCCESS;
+
+        $logStep->log_id = $childRunLogData?->id;
+        $logStep->output = 'Workflow ['.$childWorkflowName.'] finished with status ['.($childRunLogData?->status->value ?? WorkflowStatus::FAILED->value).'].';
+        $logStep->exitCode = $successful ? 0 : 1;
+        $logStep->ended_timestamp = now()->timestamp;
+        $this->flushRunLog();
+
+        Log::info('workflow: child workflow completed', [
+            ...$stepContext,
+            'child_workflow_name' => $childWorkflowName,
+            'child_log_id' => $childRunLogData?->id,
+            'child_status' => $childRunLogData?->status->value,
+        ]);
+
+        return $successful;
+    }
+
+    /**
+     * Record a workflow step that never got as far as running its child workflow.
+     *
+     * @param  array<string, mixed>  $stepContext
+     */
+    protected function failChildWorkflowStep(WorkflowRunLogStepData $logStep, string $reason, array $stepContext): bool
+    {
+        Log::info('workflow: child workflow not run', [
+            ...$stepContext,
+            'reason' => $reason,
+        ]);
+
+        $logStep->output = $reason;
+        $logStep->exitCode = 1;
+        $logStep->ended_timestamp = now()->timestamp;
+        $this->flushRunLog();
+
+        return false;
     }
 
     /**
@@ -531,6 +636,7 @@ class RunWorkflow implements ShouldQueue
             'workspace_path' => $this->workspacePath,
             'workflow_name' => $this->workflowName,
             'parent' => $this->parent,
+            'ancestors' => $this->ancestorWorkflowNames,
             ...$extra,
         ];
     }

@@ -66,6 +66,22 @@ class WorkflowLog extends Page implements HasActions, HasSchemas, HasTable
         return WorkflowRunLogData::from($this->workflowRunLog);
     }
 
+    /**
+     * The run that started this one, when it was started by another workflow's step.
+     *
+     * Resolves to null once the parent's log has been deleted, leaving the page with nothing to
+     * link to rather than a dead link.
+     */
+    #[Computed]
+    public function parentRunLogData(): ?WorkflowRunLogData
+    {
+        $parent = $this->workflowRunLogData->parent;
+
+        return $parent === null
+            ? null
+            : app(WorkflowService::class)->loadWorkflowLogDatum($this->workspaceData, $parent);
+    }
+
     #[On('native:'.WorkflowStarted::class)]
     public function onWorkflowStarted(
         ?string $projectUuid = null,

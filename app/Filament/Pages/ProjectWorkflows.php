@@ -76,6 +76,20 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
         return app(WorkflowService::class)->loadWorkflowLogData($this->workspaceData);
     }
 
+    /**
+     * Name every run by its log id, so a chained run can show the name of the run that started
+     * it without reading the parent's log file back off disk.
+     *
+     * @return array<string, string> run log id => workflow name
+     */
+    #[Computed]
+    public function workflowNamesByLogId(): array
+    {
+        return $this->workflowLogData
+            ->mapWithKeys(fn (WorkflowRunLogData $workflowRunLogData) => [$workflowRunLogData->id => $workflowRunLogData->name])
+            ->all();
+    }
+
     #[On('native:'.WorkflowFinished::class)]
     #[On('native:'.WorkflowStarted::class)]
     public function onWorkflowStartedOrFinished(
@@ -182,6 +196,10 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
                 TextColumn::make('name')
                     ->label('Workflow')
                     ->formatStateUsing(fn ($state) => ucwords($state)),
+                TextColumn::make('parent')
+                    ->label('Started by')
+                    ->placeholder('—')
+                    ->formatStateUsing(fn ($state) => ucwords($this->workflowNamesByLogId[$state] ?? $state)),
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()

@@ -34,6 +34,8 @@ class WorkflowRunLogStepData extends Data
         public ?int $started_timestamp = null,
         public ?int $ended_timestamp = null,
         public ?string $hash = null,
+        /** The run log id of the workflow this step started, set on workflow steps only. */
+        public ?string $log_id = null,
     ) {}
 
     /**

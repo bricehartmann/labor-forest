@@ -581,7 +581,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                             workspacePath: $record['path'],
                                             workflowName: $name,
                                             stepHashes: $runSteps,
-                                            parent: null,
+                                            parentLogId: null,
                                             timeoutSeconds: $settings->workflow_timeout_seconds,
                                         );
 
