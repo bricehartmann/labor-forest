@@ -59,6 +59,13 @@ class WorkflowLog extends Page implements HasActions, HasSchemas, HasTable
         return WorkflowRunLogData::from($this->workflowRunLog);
     }
 
+    public function onWorkflowLogUpdate(string $id)
+    {
+        if ($this->workflowRunLogData->id === $id) {
+            $this->reloadData();
+        }
+    }
+
     public function mount(string $uuid, string $slug, string $id): void
     {
         $this->loadProjectData($uuid, $slug, $id);

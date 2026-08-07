@@ -5,6 +5,7 @@ namespace App\Data;
 use App\Enums\WorkflowStatus;
 use App\Enums\YamlResourceType;
 use Illuminate\Support\Collection;
+use RuntimeException;
 use Spatie\LaravelData\Attributes\WithCast;
 use Spatie\LaravelData\Casts\EnumCast;
 use Spatie\LaravelData\Data;
@@ -33,8 +34,19 @@ class WorkflowRunLogData extends Data
         ];
     }
 
-    public function appendToSteps(WorkflowRunLogStepData $step): void
+    /**
+     * Fetch the log entry seeded for a step so a run can fill it in as the step progresses.
+     *
+     * @throws RuntimeException when the run log was not seeded with a step at this index
+     */
+    public function step(int|string $index): WorkflowRunLogStepData
     {
-        $this->steps->push($step);
+        $step = $this->steps->get($index);
+
+        if (! $step instanceof WorkflowRunLogStepData) {
+            throw new RuntimeException("Run log has no step at index [{$index}].");
+        }
+
+        return $step;
     }
 }

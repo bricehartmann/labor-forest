@@ -3,6 +3,7 @@
 namespace App\Enums;
 
 use Filament\Support\Contracts\HasColor;
+use Filament\Support\Icons\Heroicon;
 
 enum WorkflowStatus: string implements HasColor
 {
@@ -26,6 +27,16 @@ enum WorkflowStatus: string implements HasColor
         return match ($this) {
             self::PENDING, self::RUNNING => true,
             self::SUCCESS, self::FAILED => false,
+        };
+    }
+
+    public function getIcon(): Heroicon
+    {
+        return match ($this) {
+            self::PENDING => Heroicon::EllipsisHorizontalCircle,
+            self::RUNNING => Heroicon::PlayCircle,
+            self::SUCCESS => Heroicon::CheckCircle,
+            self::FAILED => Heroicon::XCircle,
         };
     }
 }

@@ -92,6 +92,7 @@ class RunWorkflow implements ShouldQueue
             workflowName: $this->workflowName,
             parentWorkflowName: $this->parent,
             status: WorkflowStatus::RUNNING,
+            workflowSteps: $workflowData->steps,
         );
         $logFileName = $this->workflowRunLogData->id.'.'.FileExtension::YAML->value;
         $this->logFilePath = $workflowService->ensureLogFilePathDirectoryExists($workspaceData->path).DIRECTORY_SEPARATOR.$logFileName;
@@ -122,6 +123,7 @@ class RunWorkflow implements ShouldQueue
             $this->workflowRunLogData->status = WorkflowStatus::SUCCESS;
         } else {
             $this->workflowRunLogData->status = WorkflowStatus::FAILED;
+            $this->markUnreachedStepsAborted();
         }
 
         Log::info('workflow: run finished', $this->logContext([
@@ -171,6 +173,7 @@ class RunWorkflow implements ShouldQueue
 
         foreach ($workflowData->steps as $index => $step) {
             $stepHash = $step->hash((string) $index);
+            $logStep = $this->workflowRunLogData->step($index);
             $stepContext = $this->logContext([
                 'step_index' => $index,
                 'step_name' => $step->name,
@@ -273,9 +276,30 @@ class RunWorkflow implements ShouldQueue
                 }
             }
 
-            $workflowService = app(WorkflowService::class);
+            if ($skipReason) {
+                $logStep->skip_reason = $skipReason;
+                $this->flushRunLog();
 
-            if (! $skipReason && $step->type === WorkflowStepType::SHELL) {
+                broadcast(new WorkflowStepSkipped(
+                    projectUuid: $projectData->uuid,
+                    workspaceSlugKebab: $workspaceData->slugKebab(),
+                    workflowName: $this->workflowName,
+                    stepHash: $stepHash,
+                    reason: $skipReason->value,
+                ));
+
+                Log::info('workflow: skipped step recorded', [
+                    ...$stepContext,
+                    'skip_reason' => $skipReason->value,
+                ]);
+
+                continue;
+            }
+
+            $logStep->started_timestamp = now()->timestamp;
+            $this->flushRunLog();
+
+            if ($step->type === WorkflowStepType::SHELL) {
                 $output = '';
 
                 $command = $replacementService->replace(
@@ -289,20 +313,21 @@ class RunWorkflow implements ShouldQueue
                     'command' => $command,
                 ]);
 
-                $start = now()->timestamp;
-
                 $runProcess = Process::fromShellCommandline(
                     command: $this->strictShellCommand($command),
                     cwd: $workspaceData->path,
                     env: $env,
                 );
                 $runProcess->setTimeout($this->timeout ?: null);
-                $runProcess->run(function ($type, $buffer) use (&$output, $projectData, $workspaceData, $stepHash): void {
+                $runProcess->run(function ($type, $buffer) use (&$output, $logStep, $projectData, $workspaceData, $stepHash): void {
                     if ($type === Process::ERR) {
                         $output .= 'ERROR: '.$buffer;
                     } else {
                         $output .= $buffer;
                     }
+
+                    // held in memory only: rewriting the whole log per output chunk would be pathological IO
+                    $logStep->output = $output;
 
                     broadcast(new WorkflowStepOutputUpdated(
                         projectUuid: $projectData->uuid,
@@ -320,21 +345,10 @@ class RunWorkflow implements ShouldQueue
                     'output_preview' => Str::limit($output, 200),
                 ]);
 
-                $this->workflowRunLogData->appendToSteps(new WorkflowRunLogStepData(
-                    name: $step->name,
-                    type: $step->type,
-                    exitCode: $runProcess->getExitCode(),
-                    output: $output,
-                    skip_reason: $skipReason,
-                    env: $step->env,
-                    if: $step->if,
-                    unless: $step->unless,
-                    run: $step->run,
-                    map: null,
-                    started_timestamp: $start,
-                    ended_timestamp: now()->timestamp,
-                ));
-                $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
+                $logStep->exitCode = $runProcess->getExitCode();
+                $logStep->output = $output;
+                $logStep->ended_timestamp = now()->timestamp;
+                $this->flushRunLog();
 
                 if (! $runProcess->isSuccessful()) {
                     $allSuccessful = false;
@@ -358,7 +372,7 @@ class RunWorkflow implements ShouldQueue
                         status: WorkflowStatus::SUCCESS->value,
                     ));
                 }
-            } elseif (! $skipReason && $step->type === WorkflowStepType::UPDATE_ENV) {
+            } elseif ($step->type === WorkflowStepType::UPDATE_ENV) {
                 $envPath = $workspaceData->path.DIRECTORY_SEPARATOR.FileName::ENV->value;
                 $envFileCreated = ! File::exists($envPath);
 
@@ -371,8 +385,6 @@ class RunWorkflow implements ShouldQueue
                     'env_path' => $envPath,
                     'env_file_created' => $envFileCreated,
                 ]);
-
-                $start = now()->timestamp;
 
                 $contents = File::get($envPath);
                 $written = [];
@@ -395,21 +407,9 @@ class RunWorkflow implements ShouldQueue
                     'keys_written' => array_keys($step->map ?? []),
                 ]);
 
-                $this->workflowRunLogData->appendToSteps(new WorkflowRunLogStepData(
-                    name: $step->name,
-                    type: $step->type,
-                    exitCode: 0,
-                    output: '',
-                    skip_reason: $skipReason,
-                    env: $step->env,
-                    if: $step->if,
-                    unless: $step->unless,
-                    run: null,
-                    map: $step->map,
-                    started_timestamp: $start,
-                    ended_timestamp: now()->timestamp,
-                ));
-                $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
+                $logStep->exitCode = 0;
+                $logStep->ended_timestamp = now()->timestamp;
+                $this->flushRunLog();
 
                 Log::info('workflow: step finished', $stepContext);
 
@@ -420,48 +420,50 @@ class RunWorkflow implements ShouldQueue
                     stepHash: $stepHash,
                     status: WorkflowStatus::SUCCESS->value,
                 ));
-            } elseif (! $skipReason && $step->type === WorkflowStepType::WORKFLOW) {
-                Log::info('workflow: nested workflow step is not implemented, skipping', $stepContext);
+            } else {
+                // WorkflowStepType::WORKFLOW, plus any type added without a branch here
 
                 // todo: dispatch workflow ???
 
                 // todo: broadcast event??? (workflow started/dispatched only)
-            } elseif ($skipReason) {
-                $this->workflowRunLogData->appendToSteps(new WorkflowRunLogStepData(
-                    name: $step->name,
-                    type: $step->type,
-                    exitCode: null,
-                    output: '',
-                    skip_reason: $skipReason,
-                    env: $step->env,
-                    if: $step->if,
-                    unless: $step->unless,
-                    run: $step->run,
-                    map: $step->map,
-                ));
-                $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
+
+                Log::info('workflow: step type is not implemented, skipping', $stepContext);
+
+                $logStep->skip_reason = WorkflowStepSkipReason::NOT_IMPLEMENTED;
+                $logStep->ended_timestamp = now()->timestamp;
+                $this->flushRunLog();
 
                 broadcast(new WorkflowStepSkipped(
                     projectUuid: $projectData->uuid,
                     workspaceSlugKebab: $workspaceData->slugKebab(),
                     workflowName: $this->workflowName,
                     stepHash: $stepHash,
-                    reason: $skipReason->value,
+                    reason: WorkflowStepSkipReason::NOT_IMPLEMENTED->value,
                 ));
-
-                Log::info('workflow: skipped step recorded', [
-                    ...$stepContext,
-                    'skip_reason' => $skipReason->value,
-                ]);
-            } else {
-                Log::info('workflow: step matched no branch', [
-                    ...$stepContext,
-                    'skip_reason' => $skipReason?->value,
-                ]);
             }
         }
 
         return $allSuccessful;
+    }
+
+    /**
+     * Persist the current state of the run log, which steps mutate in place as they progress.
+     */
+    protected function flushRunLog(): void
+    {
+        app(WorkflowService::class)->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
+    }
+
+    /**
+     * Mark the steps a failed run never got to, so they read as abandoned rather than upcoming.
+     */
+    protected function markUnreachedStepsAborted(): void
+    {
+        $this->workflowRunLogData->steps
+            ->filter(fn (WorkflowRunLogStepData $step) => $step->isPending())
+            ->each(function (WorkflowRunLogStepData $step): void {
+                $step->skip_reason = WorkflowStepSkipReason::ABORTED;
+            });
     }
 
     /**

@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
+use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\FileExtension;
@@ -39,12 +41,19 @@ class WorkflowService
         File::put($logFilePath, Yaml::dump($workflowRunLogData->toArray(), 10));
     }
 
+    /**
+     * Build a run log seeded with a pending entry for every step of the workflow, so the log
+     * lists the steps still to come rather than only the ones that have already run.
+     *
+     * @param  Collection<int, WorkflowStepData>  $workflowSteps
+     */
     public function workflowRunLogData(
         int $timestamp,
         WorkspaceData $workspaceData,
         string $workflowName,
         ?string $parentWorkflowName,
         WorkflowStatus $status,
+        Collection $workflowSteps,
     ): WorkflowRunLogData {
         $now = Carbon::createFromTimestampUTC($timestamp);
         $logFileId = $now->format('Ymd\THis\Z').'_'.$workspaceData->slugKebab().'_'.Str::slug($workflowName);
@@ -56,10 +65,15 @@ class WorkflowService
             timestamp: $timestamp,
             status: $status,
             exception: null,
-            steps: collect(),
+            steps: $workflowSteps
+                ->values()
+                ->map(fn (WorkflowStepData $step, int $index) => WorkflowRunLogStepData::pending($step, $step->hash((string) $index))),
         );
     }
 
+    /**
+     * @throws InvalidWorkflowFile
+     */
     public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parent, int $timeoutSeconds): void
     {
         $projectService = app(ProjectsService::class);
@@ -72,6 +86,7 @@ class WorkflowService
             workflowName: $workflowName,
             parentWorkflowName: $parent,
             status: WorkflowStatus::PENDING,
+            workflowSteps: $this->loadSteps($workspacePath, $workflowName),
         );
         $logFileName = $workflowRunLogData->id.'.'.FileExtension::YAML->value;
         $logFilePath = $this->ensureLogFilePathDirectoryExists($workspaceData->path).DIRECTORY_SEPARATOR.$logFileName;

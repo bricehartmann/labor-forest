@@ -33,7 +33,36 @@ class WorkflowRunLogStepData extends Data
         public ?array $map = null,
         public ?int $started_timestamp = null,
         public ?int $ended_timestamp = null,
+        public ?string $hash = null,
     ) {}
+
+    /**
+     * Build the log entry for a step that has not run yet, so a run log can list
+     * every step of its workflow from the moment the run is created.
+     */
+    public static function pending(WorkflowStepData $step, string $hash): self
+    {
+        return new self(
+            name: $step->name,
+            type: $step->type,
+            exitCode: null,
+            output: '',
+            env: $step->env,
+            if: $step->if,
+            unless: $step->unless,
+            run: $step->run,
+            map: $step->map,
+            hash: $hash,
+        );
+    }
+
+    /**
+     * Whether this step has neither started nor been given a reason for not running.
+     */
+    public function isPending(): bool
+    {
+        return $this->status() === WorkflowStepStatus::PENDING;
+    }
 
     public static function rules(): array
     {
@@ -85,7 +114,7 @@ class WorkflowRunLogStepData extends Data
             $this->exitCode === 0 => WorkflowStepStatus::SUCCESS,
             $this->exitCode !== null => WorkflowStepStatus::FAILED,
             $this->started_timestamp !== null => WorkflowStepStatus::RUNNING,
-            default => Heroicon::EllipsisHorizontalCircle,
+            default => WorkflowStepStatus::PENDING,
         };
     }
 
