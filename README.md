@@ -2,6 +2,8 @@
 A desktop app for MacOS to manage git worktrees and local workflows.
 
 ## Starting from scratch
+Clone the repo and run the command below:
+
 ```shell
 composer run setup
 ```
@@ -20,7 +22,7 @@ php artisan native:build mac arm64
 
 ## Important directories
 - `~/.laborforest` - tracks projects and settings
-- `<project>/.laborforest/ignored` - tracks workspace status, hold workflow run logs
+- `<project>/.laborforest/ignored` - tracks workspace status, holds workflow run logs
 - `<project>/.laborforest/workflows` - holds workflows for the project
 
 ## Using without committing `.laborforest` directory
