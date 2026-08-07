@@ -1,58 +1,119 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# 🌲 LaborForest
+A desktop app for MacOS to manage git worktrees and local workflows.
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
-
-## About Laravel
-
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+## Starting from scratch
+```shell
+composer run setup
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Building for development
+Application hot reloads upon changes.
+```shell
+composer run native:dev
+```
 
-## Contributing
+## Building for production
+Output: `nativephp/electron/dist/LaborForest-1.0.0-arm64.dmg`
+```shell
+php artisan native:build mac arm64
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Important directories
+- `~/.laborforest` - tracks projects and settings
+- `<project>/.laborforest/ignored` - tracks workspace status, hold workflow run logs
+- `<project>/.laborforest/workflows` - holds workflows for the project
 
-## Code of Conduct
+## Sample workflows (Laravel)
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### `up.yaml`
+```yaml
+resource_type: workflow
+require_status: suspended
+ending_status: ready
+sort_order: 0
+steps:
+  - name: 'Copy .env file from primary project directory'
+    type: shell
+    if: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"'
+    run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env'
+  - name: 'Update .env file'
+    type: update_env
+    if: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"'
+    map:
+      APP_URL: 'https://{{ WORKSPACE_SLUG_KEBAB }}.test'
+      AWS_BUCKET: '{{ WORKSPACE_SLUG_KEBAB }}'
+      DB_DATABASE: '{{ WORKSPACE_SLUG_SNAKE }}'
+      REDIS_PREFIX: '{{ WORKSPACE_SLUG_KEBAB }}-database-'
+  - name: 'Create S3 bucket'
+    type: shell
+    unless: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api create-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Create MySQL schema'
+    type: shell
+    run: 'mysql -h {{ ENV_DB_HOST }} -P {{ ENV_DB_PORT }} -u {{ ENV_DB_USERNAME }} $([[ -z "{{ ENV_DB_PASSWORD }}" ]] && echo "--skip-password" || echo "-p{{ ENV_DB_PASSWORD }}") -e "CREATE DATABASE IF NOT EXISTS {{ ENV_DB_DATABASE }} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"'
+  - name: 'Install Composer dependencies'
+    type: shell
+    run: 'composer install --no-interaction'
+  - name: Install NPM dependencies
+    type: shell
+    run: 'npm ci'
+  - name: 'Build assets'
+    type: shell
+    run: 'npm run build'
+  - name: 'Link Laravel Herd site'
+    type: shell
+    run: 'herd link --no-interaction --secure {{ WORKSPACE_SLUG_KEBAB }}'
+  - name: 'Refresh application data'
+    type: workflow
+    run: refresh
+```
 
-## Security Vulnerabilities
+### `refresh.yaml`
+```yaml
+resource_type: workflow
+require_status: ready
+ending_status: ready
+sort_order: 2
+steps:
+    - name: 'Run fresh migrations'
+      type: shell
+      run: 'php artisan -vvv migrate:fresh'
+    - name: 'Run database seeder'
+      type: shell
+      run: 'php artisan -vvv db:seed'
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### `down.yaml`
+```yaml
+resource_type: workflow
+require_status: ready
+ending_status: suspended
+sort_order: 100
+steps:
+  - name: 'Empty S3 bucket'
+    type: shell
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm s3://{{ ENV_AWS_BUCKET }} --recursive --include="*"'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Delete S3 bucket'
+    type: shell
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api delete-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Drop MySQL schema'
+    type: shell
+    run: 'mysql -h {{ ENV_DB_HOST }} -P {{ ENV_DB_PORT }} -u {{ ENV_DB_USERNAME }} $([[ -z "{{ ENV_DB_PASSWORD }}" ]] && echo "--skip-password" || echo "-p{{ ENV_DB_PASSWORD }}") -e "DROP DATABASE IF EXISTS {{ ENV_DB_DATABASE }}"'
+  - name: 'Remove Laravel Herd site'
+    type: shell
+    run: 'herd unlink --no-interaction {{ WORKSPACE_SLUG_KEBAB }}'
+```
