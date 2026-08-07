@@ -197,7 +197,7 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
                     ->button()
                     ->icon(Heroicon::Eye)
                     ->label('View')
-                    ->color('info')
+                    ->color('primary')
                     ->url(fn (array $record) => WorkflowLog::getUrl(['uuid' => $this->projectData->uuid, 'slug' => $this->workspaceData->slugKebab(), 'id' => $record['id']])),
             ])
             ->toolbarActions([

@@ -49,6 +49,10 @@ class WorkflowNotifications extends Component
             return;
         }
 
+        if ($workflowStatus !== WorkflowStatus::SUCCESS && $workflowStatus !== WorkflowStatus::FAILED) {
+            return;
+        }
+
         $isSuccess = $workflowStatus === WorkflowStatus::SUCCESS;
 
         Notification::make()
@@ -92,8 +96,8 @@ class WorkflowNotifications extends Component
         $projectDirName = rescue(fn (): ?string => app(ProjectsService::class)->loadProject($projectUuid)->dirName(), null, report: false);
 
         return $projectDirName === null
-            ? $workflowName.' — '.$workspaceSlugKebab
-            : $workflowName.' — '.$projectDirName.'-'.$workspaceSlugKebab;
+            ? ucwords($workflowName).' — '.$workspaceSlugKebab
+            : ucwords($workflowName).' — '.$projectDirName.'-'.$workspaceSlugKebab;
     }
 
     public function render(): View

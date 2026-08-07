@@ -375,7 +375,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
         return Action::make('editLaunchCommands')
             ->label('Edit launch commands')
-            ->color('info')
+            ->color('primary')
             ->button()
             ->modal()
             ->modalHeading('Edit Launch Commands')
@@ -515,7 +515,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                 ])
                     ->button()
                     ->label('Launch')
-                    ->color('primary'),
+                    ->color('info'),
                 ActionGroup::make([
                     Action::make('create_starter_workflows')
                         ->hidden(fn (array $record) => app(ProjectsService::class)->doesAnyProjectWorkspaceWorkflowExist($record['path']))
@@ -604,7 +604,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->button()
                     ->icon(Heroicon::ListBullet)
                     ->label('Logs')
-                    ->color('info')
+                    ->color('primary')
                     ->url(fn (array $record) => ProjectWorkflows::getUrl(['uuid' => $this->projectData->uuid, 'slug' => WorkspaceData::from($record)->slugKebab()])),
                 ActionGroup::make([
                     Action::make('override_status')
