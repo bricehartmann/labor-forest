@@ -41,7 +41,12 @@ class AppPanelProvider extends PanelProvider
                 default: fn (Panel $p) => $p->darkMode(false),
             )
             ->colors([
-                'primary' => Color::Mist,
+                'primary' => Color::hex('#9d4edd'),
+                'danger' => Color::hex('#bb2124'),
+                'success' => Color::hex('#22bb33'),
+                'warning' => Color::hex('#f0ad4e'),
+                'info' => Color::hex('#5bc0de'),
+                'gray' => Color::hex('#ffffff'),
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')

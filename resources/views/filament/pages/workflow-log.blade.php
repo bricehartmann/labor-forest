@@ -19,8 +19,31 @@
             <div class="text-3xl">{{ $this->workflowRunLogData->status->value }}</div>
         </div>
 
-        @foreach($this->workflowRunLogData->steps as $index => $step)
-            <livewire:workflow-log-step wire:key="step-{{ $step->hash ?? $index }}" :step="$step->toArray()"/>
-        @endforeach
+        <div
+            x-data="{ lastStepHash: null }"
+            x-on:scroll-to-step.window="
+                const stepHash = $event.detail.stepHash;
+
+                if (! stepHash || stepHash === lastStepHash) return;
+
+                lastStepHash = stepHash;
+
+                requestAnimationFrame(() => $el.querySelector(`#step-${stepHash}`)
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+            "
+            x-on:scroll-to-top.window="
+                lastStepHash = null;
+
+                requestAnimationFrame(() => requestAnimationFrame(() =>
+                    window.scrollTo({ top: 0, behavior: 'smooth' })));
+            "
+            class="flex flex-col gap-6"
+        >
+            @foreach($this->workflowRunLogData->steps as $index => $step)
+                <div id="step-{{ $step->hash ?? $index }}" wire:key="step-wrapper-{{ $step->hash ?? $index }}">
+                    <livewire:workflow-log-step wire:key="step-{{ $step->hash ?? $index }}" :step="$step->toArray()"/>
+                </div>
+            @endforeach
+        </div>
     @endif
 </x-filament-panels::page>

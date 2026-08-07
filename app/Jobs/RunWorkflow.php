@@ -37,6 +37,12 @@ class RunWorkflow implements ShouldQueue
 {
     use Queueable;
 
+    /**
+     * Minimum seconds between step output broadcasts; process output arrives in far smaller chunks
+     * than the UI can usefully render.
+     */
+    protected const OUTPUT_BROADCAST_INTERVAL_SECONDS = 1.0;
+
     public ?string $logFilePath = null;
 
     public ?WorkflowRunLogData $workflowRunLogData = null;
@@ -139,6 +145,7 @@ class RunWorkflow implements ShouldQueue
             workspaceSlugKebab: $workspaceData->slugKebab(),
             workflowName: $this->workflowName,
             status: $allSuccessful ? WorkflowStatus::SUCCESS->value : WorkflowStatus::FAILED->value,
+            logId: $this->workflowRunLogData->id,
         ));
 
         $finalStatus = match (true) {
@@ -182,13 +189,6 @@ class RunWorkflow implements ShouldQueue
             ]);
 
             Log::info('workflow: step started', $stepContext);
-
-            broadcast(new WorkflowStepStarted(
-                projectUuid: $projectData->uuid,
-                workspaceSlugKebab: $workspaceData->slugKebab(),
-                workflowName: $this->workflowName,
-                stepHash: $stepHash,
-            ));
 
             $skipReason = null;
 
@@ -299,8 +299,17 @@ class RunWorkflow implements ShouldQueue
             $logStep->started_timestamp = now()->timestamp;
             $this->flushRunLog();
 
+            // broadcast after the flush so a listener re-reading the log sees the step as running
+            broadcast(new WorkflowStepStarted(
+                projectUuid: $projectData->uuid,
+                workspaceSlugKebab: $workspaceData->slugKebab(),
+                workflowName: $this->workflowName,
+                stepHash: $stepHash,
+            ));
+
             if ($step->type === WorkflowStepType::SHELL) {
                 $output = '';
+                $lastOutputBroadcastAt = 0.0;
 
                 $command = $replacementService->replace(
                     projectData: $projectData,
@@ -319,7 +328,7 @@ class RunWorkflow implements ShouldQueue
                     env: $env,
                 );
                 $runProcess->setTimeout($this->timeout ?: null);
-                $runProcess->run(function ($type, $buffer) use (&$output, $logStep, $projectData, $workspaceData, $stepHash): void {
+                $runProcess->run(function ($type, $buffer) use (&$output, &$lastOutputBroadcastAt, $logStep, $projectData, $workspaceData, $stepHash): void {
                     if ($type === Process::ERR) {
                         $output .= 'ERROR: '.$buffer;
                     } else {
@@ -329,6 +338,14 @@ class RunWorkflow implements ShouldQueue
                     // held in memory only: rewriting the whole log per output chunk would be pathological IO
                     $logStep->output = $output;
 
+                    $now = microtime(true);
+
+                    if ($now - $lastOutputBroadcastAt < self::OUTPUT_BROADCAST_INTERVAL_SECONDS) {
+                        return;
+                    }
+
+                    $lastOutputBroadcastAt = $now;
+
                     broadcast(new WorkflowStepOutputUpdated(
                         projectUuid: $projectData->uuid,
                         workspaceSlugKebab: $workspaceData->slugKebab(),
@@ -337,6 +354,15 @@ class RunWorkflow implements ShouldQueue
                         output: $output,
                     ));
                 });
+
+                // the throttle above can swallow the final chunks, so always broadcast the whole buffer
+                broadcast(new WorkflowStepOutputUpdated(
+                    projectUuid: $projectData->uuid,
+                    workspaceSlugKebab: $workspaceData->slugKebab(),
+                    workflowName: $this->workflowName,
+                    stepHash: $stepHash,
+                    output: $output,
+                ));
 
                 Log::info('workflow: shell step completed', [
                     ...$stepContext,
@@ -557,6 +583,7 @@ class RunWorkflow implements ShouldQueue
                 workspaceSlugKebab: $workspaceData->slugKebab(),
                 workflowName: $this->workflowName,
                 status: WorkflowStatus::FAILED->value,
+                logId: $this->workflowRunLogData?->id,
             ));
 
             $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::ERROR);

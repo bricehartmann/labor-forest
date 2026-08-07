@@ -499,6 +499,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                         }),
                     Action::make('launch_browser')
                         ->label('Browser')
+                        ->disabled(fn (array $record) => WorkspaceStatus::from($record['status']) === WorkspaceStatus::SUSPENDED)
                         ->hidden(empty($this->projectData->command_launch_browser) && empty($settings->command_launch_browser))
                         ->icon(Heroicon::OutlinedGlobeAlt)
                         ->action(function (array $record) {
@@ -542,7 +543,16 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             ->modal()
                             ->modalHeading('Run '.Str::headline($name).' Workflow')
                             ->modalDescription('Select which steps in the workflow you would like to run.')
-                            ->modalSubmitActionLabel('Run')
+                            ->modalFooterActions(fn (Action $action): array => [
+                                $action->makeModalSubmitAction('run_watch', arguments: ['watch' => true])
+                                    ->color('success')
+                                    ->label('Run & watch'),
+                                $action->makeModalSubmitAction('run', arguments: ['watch' => false])
+                                    ->color('primary')
+                                    ->label('Run'),
+                                $action->getModalCancelAction()
+                                    ->label('Cancel'),
+                            ])
                             ->modalFooterActionsAlignment(Alignment::End)
                             ->modalWidth(Width::Large)
                             ->schema(fn (array $record) => [
@@ -552,16 +562,16 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                         ->default(true)
                                     ),
                             ])
-                            ->action(function (array $data, array $record) use ($name, $settings) {
+                            ->action(function (array $data, array $arguments, array $record) use ($name, $settings) {
                                 static::resultNotificationOperation(
-                                    callback: function () use ($data, $record, $name, $settings) {
+                                    callback: function () use ($data, $arguments, $record, $name, $settings) {
                                         $runSteps = collect($data)
                                             ->reject(fn ($datum) => ! $datum)
                                             ->map(fn ($datum, $key) => Str::replaceStart('step_', '', $key))
                                             ->values()
                                             ->all();
 
-                                        app(WorkflowService::class)->dispatchWorkflow(
+                                        $id = app(WorkflowService::class)->dispatchWorkflow(
                                             projectUuid: $this->projectData->uuid,
                                             workspacePath: $record['path'],
                                             workflowName: $name,
@@ -569,6 +579,16 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                             parent: null,
                                             timeoutSeconds: $settings->workflow_timeout_seconds,
                                         );
+
+                                        if ($arguments['watch'] ?? false) {
+                                            $this->redirect(WorkflowLog::getUrl([
+                                                'uuid' => $this->projectData->uuid,
+                                                'slug' => WorkspaceData::from($record)->slugKebab(),
+                                                'id' => $id,
+                                            ]));
+
+                                            return;
+                                        }
 
                                         $this->reloadData();
                                     },

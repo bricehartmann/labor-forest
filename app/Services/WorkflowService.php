@@ -13,6 +13,7 @@ use App\Enums\WorkflowStatus;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Exceptions\WorkspaceNotFound;
 use App\Jobs\RunWorkflow;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -73,8 +74,9 @@ class WorkflowService
 
     /**
      * @throws InvalidWorkflowFile
+     * @throws WorkspaceNotFound
      */
-    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parent, int $timeoutSeconds): void
+    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parent, int $timeoutSeconds): string
     {
         $projectService = app(ProjectsService::class);
         $workspaceData = $projectService->loadProjectWorkspace($workspacePath);
@@ -93,6 +95,8 @@ class WorkflowService
         $this->writeWorkflowLogData($logFilePath, $workflowRunLogData);
 
         dispatch(new RunWorkflow($timestamp, $projectUuid, $workspacePath, $workflowName, $stepHashes, $parent, $timeoutSeconds));
+
+        return $workflowRunLogData->id;
     }
 
     /**

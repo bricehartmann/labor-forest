@@ -16,6 +16,7 @@ class WorkflowFinished implements ShouldBroadcastNow
         public string $workspaceSlugKebab,
         public string $workflowName,
         public string $status,
+        public ?string $logId = null,
     ) {
         //
     }

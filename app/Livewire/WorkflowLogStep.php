@@ -5,10 +5,12 @@ namespace App\Livewire;
 use App\Data\WorkflowRunLogStepData;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Reactive;
 use Livewire\Component;
 
 class WorkflowLogStep extends Component
 {
+    #[Reactive]
     public array $step = [];
 
     #[Computed]
