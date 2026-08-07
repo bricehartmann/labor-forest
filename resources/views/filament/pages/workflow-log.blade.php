@@ -14,6 +14,8 @@
             </x-slot>
         </x-filament::callout>
     @else
-        data
+        @foreach($this->workflowRunLogData->steps as $index => $step)
+            <livewire:workflow-log-step wire:key="$index" :step="$step->toArray()" />
+        @endforeach
     @endif
 </x-filament-panels::page>

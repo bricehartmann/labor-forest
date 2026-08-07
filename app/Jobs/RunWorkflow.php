@@ -289,6 +289,8 @@ class RunWorkflow implements ShouldQueue
                     'command' => $command,
                 ]);
 
+                $start = now()->timestamp;
+
                 $runProcess = Process::fromShellCommandline(
                     command: $this->strictShellCommand($command),
                     cwd: $workspaceData->path,
@@ -329,6 +331,8 @@ class RunWorkflow implements ShouldQueue
                     unless: $step->unless,
                     run: $step->run,
                     map: null,
+                    started_timestamp: $start,
+                    ended_timestamp: now()->timestamp,
                 ));
                 $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
 
@@ -368,6 +372,8 @@ class RunWorkflow implements ShouldQueue
                     'env_file_created' => $envFileCreated,
                 ]);
 
+                $start = now()->timestamp;
+
                 $contents = File::get($envPath);
                 $written = [];
 
@@ -400,6 +406,8 @@ class RunWorkflow implements ShouldQueue
                     unless: $step->unless,
                     run: null,
                     map: $step->map,
+                    started_timestamp: $start,
+                    ended_timestamp: now()->timestamp,
                 ));
                 $workflowService->writeWorkflowLogData($this->logFilePath, $this->workflowRunLogData);
 

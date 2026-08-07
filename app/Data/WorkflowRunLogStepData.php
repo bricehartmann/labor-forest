@@ -3,8 +3,11 @@
 namespace App\Data;
 
 use App\Enums\WorkflowStepSkipReason;
+use App\Enums\WorkflowStepStatus;
 use App\Enums\WorkflowStepType;
 use App\Rules\ValidVariables;
+use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Carbon;
 use Spatie\LaravelData\Attributes\WithCast;
 use Spatie\LaravelData\Casts\EnumCast;
 use Spatie\LaravelData\Data;
@@ -26,6 +29,8 @@ class WorkflowRunLogStepData extends Data
         public ?string $unless = null,
         public ?string $run = null,
         public ?array $map = null,
+        public ?int $started_timestamp = null,
+        public ?int $ended_timestamp = null,
     ) {}
 
     public static function rules(): array
@@ -60,6 +65,51 @@ class WorkflowRunLogStepData extends Data
                 new ValidVariables,
             ],
         ];
+    }
+
+    public function status(): WorkflowStepStatus
+    {
+        return match (true) {
+            $this->skip_reason !== null => WorkflowStepStatus::SKIPPED,
+            $this->exitCode === 0 => WorkflowStepStatus::SUCCESS,
+            $this->exitCode !== null => WorkflowStepStatus::FAILED,
+            $this->started_timestamp !== null => WorkflowStepStatus::RUNNING,
+            default => Heroicon::EllipsisHorizontalCircle,
+        };
+    }
+
+    public function getColor(): string
+    {
+        return match ($this->status()) {
+            WorkflowStepStatus::SUCCESS => 'success',
+            WorkflowStepStatus::FAILED => 'danger',
+            WorkflowStepStatus::RUNNING => 'warning',
+            default => 'gray',
+        };
+    }
+
+    public function getIcon(): Heroicon
+    {
+        return match ($this->status()) {
+            WorkflowStepStatus::SKIPPED => Heroicon::MinusCircle,
+            WorkflowStepStatus::SUCCESS => Heroicon::CheckCircle,
+            WorkflowStepStatus::FAILED => Heroicon::XCircle,
+            WorkflowStepStatus::RUNNING => Heroicon::PlayCircle,
+            default => Heroicon::EllipsisHorizontalCircle,
+        };
+    }
+
+    public function time(): ?string
+    {
+        if (! $this->started_timestamp) {
+            return null;
+        }
+
+        if (! $this->ended_timestamp) {
+            return Carbon::createFromTimestampUTC($this->started_timestamp)->shortAbsoluteDiffForHumans();
+        }
+
+        return Carbon::createFromTimestampUTC($this->ended_timestamp)->shortAbsoluteDiffForHumans(Carbon::createFromTimestampUTC($this->started_timestamp));
     }
 
     /**
