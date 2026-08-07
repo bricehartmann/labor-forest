@@ -23,6 +23,21 @@ enum HostEnvKey: string
         'LANG',
     ];
 
+    /**
+     * Environment variables forced into every spawned process so tools colorize their output even
+     * though a piped process gives them no terminal to detect.
+     */
+    public const array FORCED = [
+        'FORCE_COLOR' => '3',
+        'CLICOLOR_FORCE' => '1',
+    ];
+
+    /**
+     * Terminal type given to a spawned process when the host environment declares none, as happens
+     * in a packaged build launched outside a terminal.
+     */
+    public const string FALLBACK_TERM = 'xterm-256color';
+
     case APP_ENV = 'APP_ENV';
     case APP_DEBUG = 'APP_DEBUG';
     case APP_CONFIG_CACHE = 'APP_CONFIG_CACHE';

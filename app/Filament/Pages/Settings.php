@@ -14,7 +14,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Pages\Page;
-use Filament\Schemas\Components\Flex;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -53,29 +53,28 @@ class Settings extends Page
     {
         return $schema
             ->components([
-                Flex::make([
-                    Section::make('Notifications')
-                        ->description('Choose if you would like to be notified when a workflow run concludes.')
-                        ->schema([
-                            Toggle::make('desktop_notifications')
-                                ->label('Enable desktop notifications'),
-                        ]),
-                    Section::make('Dark mode')
-                        ->description('Choose if you would like to use the dark theme.')
-                        ->schema([
-                            Toggle::make('dark_mode')
-                                ->label('Enable dark mode'),
-                        ]),
-                ]),
-                Section::make('Workflows')
-                    ->description('Configure how workflows run on your machine.')
+                Grid::make(2)
                     ->schema([
-                        TextInput::make('workflow_timeout_seconds')
-                            ->label('Timeout')
-                            ->numeric()
-                            ->minValue(0)
-                            ->required()
-                            ->suffix('seconds'),
+                        Section::make('Workflows')
+                            ->description('Configure how workflows run on your machine.')
+                            ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
+                            ->schema([
+                                TextInput::make('workflow_timeout_seconds')
+                                    ->label('Timeout')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->maxValue(3600)
+                                    ->required()
+                                    ->suffix('seconds'),
+                            ]),
+                        Section::make('Dark mode')
+                            ->description('Choose if you would like to use the dark theme.')
+                            ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
+                            ->schema([
+                                Toggle::make('dark_mode')
+                                    ->inline(false)
+                                    ->label('Enable dark mode'),
+                            ]),
                     ]),
                 Section::make('Launch commands')
                     ->description(new HtmlString('Commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Each command can be overridden at the project level.'))

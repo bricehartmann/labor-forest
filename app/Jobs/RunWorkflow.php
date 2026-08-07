@@ -337,7 +337,7 @@ class RunWorkflow implements ShouldQueue
                 $runProcess->setTimeout($this->timeout ?: null);
                 $runProcess->run(function ($type, $buffer) use (&$output, &$lastOutputBroadcastAt, $logStep, $projectData, $workspaceData, $stepHash): void {
                     if ($type === Process::ERR) {
-                        $output .= 'ERROR: '.$buffer;
+                        $output .= 'STDERR: '.$buffer;
                     } else {
                         $output .= $buffer;
                     }

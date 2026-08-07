@@ -26,6 +26,10 @@ class ProcessEnvironmentService
      * application's configuration instead of the workspace's. A false value tells Symfony to drop
      * the variable outright.
      *
+     * Color hints are forced on top of the stripped names, because a spawned process is handed a pipe
+     * rather than a terminal and would otherwise emit plain text in a packaged build. A caller's own
+     * value still wins over both.
+     *
      * @param  array<string, string>  $env
      * @return array<string, string|false>
      */
@@ -37,7 +41,24 @@ class ProcessEnvironmentService
             $stripped[$name] = false;
         }
 
-        return [...$stripped, ...$env];
+        return [...$stripped, ...$this->forced(), ...$env];
+    }
+
+    /**
+     * Build the color hints a spawned process needs to produce ANSI output.
+     *
+     * @return array<string, string>
+     */
+    protected function forced(): array
+    {
+        $forced = HostEnvKey::FORCED;
+
+        // a real terminal type must survive, so only a host without one gets the fallback
+        if (! getenv('TERM')) {
+            $forced['TERM'] = HostEnvKey::FALLBACK_TERM;
+        }
+
+        return $forced;
     }
 
     /**
