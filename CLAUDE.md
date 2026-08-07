@@ -1,3 +1,65 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+composer setup        # first-time setup: install, .env, key:generate, migrate, npm install + build
+composer native:dev   # run the desktop app (NativePHP window + Vite HMR) — the normal way to develop
+composer dev          # web-only dev: artisan serve + queue:listen + pail + vite
+composer test         # config:clear + full test suite
+php artisan test --compact --filter=testName   # single test
+vendor/bin/pint --dirty --format agent         # format changed PHP files
+php artisan native:build                       # package the desktop app (output: nativephp/electron/dist)
+composer logs:tail    # tail packaged-app log (~/Library/Application Support/laborforest-dev/storage/logs/laravel.log)
+composer logs:wipe    # truncate that log
+```
+
+`native:build` prebuild chain (see `config/nativephp.php`): `npm run build` → `php artisan app:patch-mac-entitlements` → `php artisan optimize`.
+
+## Architecture
+
+LaborForest is a **NativePHP v2 (Electron) macOS desktop app** — a GUI for managing git worktrees ("workspaces") of local repositories ("projects") and running user-authored YAML workflows inside them. The UI is a single Filament v5 panel (`app/Providers/Filament/AppPanelProvider.php`, path `''`). There are no web routes and no Filament Resources — only Pages (`Project`, `ProjectWorkflows`, `WorkflowLog`, `Settings` in `app/Filament/Pages/`) and Widgets. Project nav items are generated dynamically from projects.yaml at panel boot.
+
+### State lives in YAML files, not the database
+
+- Global: `~/.laborforest/settings.yaml` and `~/.laborforest/projects.yaml`, accessed via the `user_home` disk (`app/Enums/Disk.php`). That disk is registered at runtime by NativePHP — it does not exist outside the native runtime and is not in `config/filesystems.php`.
+- Per-workspace: a `.laborforest/` directory inside each worktree holding `workflows/*.yaml`, `logs/*.yaml`, and `status.yaml` (paths defined by enums `Directory` and `File`).
+- SQLite is used **only as the queue backend** — the sole domain migration is the jobs table. `app/Models/User.php` is an unused stub.
+- Every domain object is a `spatie/laravel-data` class in `app/Data/` with `rules()` that validate user-authored YAML (`ProjectData`, `WorkspaceData`, `WorkflowData`, `WorkflowRunLogData`, …). Some override `transform()` to keep generated YAML clean.
+- Shared file helpers: `app/Concerns/Services/ManagesFiles.php`.
+
+### Workflow execution flow
+
+Filament page action → `WorkflowService::dispatchWorkflow()` → `RunWorkflow` job on the database queue → sets workspace status to WORKING, writes a run log with a pending entry per step, then iterates steps. Step types (`app/Enums/WorkflowStepType.php`):
+
+- `shell` — Symfony Process in the workspace cwd, wrapped in `set -eu; set -o pipefail` so mid-chain failures surface
+- `update_env` — rewrites keys in the workspace's `.env`
+- `workflow` — runs a child workflow inline (parent fails with it; cycles guarded via `ancestorWorkflowNames`)
+
+Steps support `if`/`unless` shell gates and per-step `env`. Progress is pushed to the UI by broadcasting on the NativePHP channel (`app/Enums/BroadcastChannel.php`): `WorkflowStarted`, `WorkflowStepStarted/Finished/Skipped`, `WorkflowStepOutputUpdated` (throttled to 1/sec with a final flush), `WorkflowFinished`. Final status = `ERROR` on failure, else the workflow's `ending_status`.
+
+### Services (`app/Services/`)
+
+- `GitService` — worktree/branch/status operations via the git CLI
+- `ProjectsService` — projects.yaml CRUD, workspace lifecycle, seeds starter up/down workflows, initializes `.laborforest/`
+- `WorkflowService` — loads/validates workflow YAML, builds run logs, dispatches jobs
+- `VariableReplacementService` — resolves `{{ }}` placeholders (`app/Enums/Variable.php`), including dynamic `ENV_*` read from the workspace's own `.env`
+- `ProcessEnvironmentService::sanitized()` — strips LaborForest's own env from spawned processes (`app/Enums/HostEnvKey.php`) so workspace commands don't inherit this app's `.env`
+- `LaunchService` — opens the configured IDE/browser/terminal for a workspace
+- `SettingsService` — settings.yaml load/save/sync
+
+Each service throws typed exceptions from `app/Exceptions/` (`GitStatusNotClean`, `InvalidWorkflowFile`, `UnresolvedVariable`, …). Magic strings live in backed enums in `app/Enums/`.
+
+### Gotchas
+
+- `AppServiceProvider::hardenNativeDatabaseConnection()` re-applies WAL/busy_timeout/IMMEDIATE to the `nativephp` sqlite connection because NativePHP rewrites it at boot; removing this brings back non-retryable "database is locked" errors in queue pop.
+- `vendor/nativephp/desktop/resources/build/app/` contains a stale copy of this entire application — vendor grep hits may be misleading duplicates of `app/` files.
+- Frontend is minimal: `resources/js/app.js` is empty; all UI is server-rendered Filament/Livewire. Tailwind v4 is CSS-first (no tailwind.config.js) — theme config in `resources/css/app.css` and `resources/css/filament/app/theme.css`, which safelists dynamically-built status color classes via `@source inline(...)`.
+- Livewire components `WorkflowLogStep` (ANSI→HTML step output) and `WorkflowNotifications` (listens for `native:App\Events\WorkflowFinished`) are injected globally via Filament render hooks in `AppServiceProvider`.
+- Tests: Pest 5 with sqlite `:memory:` and sync queue; currently only stub ExampleTests exist.
+
 <laravel-boost-guidelines>
 === foundation rules ===
 
