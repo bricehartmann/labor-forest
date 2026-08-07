@@ -29,7 +29,7 @@ php artisan native:build mac arm64
 If you don't want to commit the `.laborforest` directory in your repo:
 1. Add `.laborforest` to `.git/info/exclude`
 2. Be sure to click `Continue without committing` after initializing a new project
-3. The workflows in the primary workspace will be automatically copied to new worktrees
+3. The workflows in `<primary-dir>/.laborforest/workflows` will be automatically copied to new worktrees
 
 ## Sample workflows (Laravel)
 
