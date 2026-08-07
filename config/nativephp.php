@@ -168,6 +168,7 @@ return [
     'prebuild' => [
         'npm run build',
         'php artisan app:patch-mac-entitlements',
+        'php artisan optimize',
     ],
 
     'postbuild' => [
