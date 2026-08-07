@@ -147,6 +147,7 @@ class ProjectsService
         );
 
         $this->initializeProjectWorkspaceBaseDirectory($worktreeData->path);
+        $this->syncWorkspaceWorkflowsFromPrimary($projectData->path, $worktreeData->path);
 
         return new WorkspaceData(
             is_primary: false,
@@ -162,8 +163,15 @@ class ProjectsService
      */
     public function loadProjectWorkspaces(string $path): Collection
     {
-        return collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []))
-            ->map(fn (WorktreeData $worktreeData) => $this->makeWorkspaceData($worktreeData));
+        $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []));
+
+        $primaryPath = $worktrees->firstWhere('is_primary', true)?->path;
+
+        if ($primaryPath !== null) {
+            $worktrees->each(fn (WorktreeData $worktreeData) => $this->syncWorkspaceWorkflowsFromPrimary($primaryPath, $worktreeData->path));
+        }
+
+        return $worktrees->map(fn (WorktreeData $worktreeData) => $this->makeWorkspaceData($worktreeData));
     }
 
     /**
@@ -357,6 +365,43 @@ class ProjectsService
 
             \Illuminate\Support\Facades\File::put($pathWorkflowDown, Yaml::dump($workflowDown->toArray(), inline: 10));
         }
+    }
+
+    /**
+     * Git worktrees only materialize tracked files, so a gitignored `.laborforest/workflows`
+     * directory is absent from every new workspace. Seed it from the primary worktree.
+     */
+    protected function syncWorkspaceWorkflowsFromPrimary(string $primaryPath, string $workspacePath): void
+    {
+        if ($primaryPath === $workspacePath) {
+            return;
+        }
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($workspacePath)) {
+            return;
+        }
+
+        $destination = implode(DIRECTORY_SEPARATOR, [
+            $workspacePath,
+            Directory::BASE->value,
+            Directory::WORKFLOWS->value,
+        ]);
+
+        if (\Illuminate\Support\Facades\File::isDirectory($destination)) {
+            return;
+        }
+
+        $source = implode(DIRECTORY_SEPARATOR, [
+            $primaryPath,
+            Directory::BASE->value,
+            Directory::WORKFLOWS->value,
+        ]);
+
+        if (! \Illuminate\Support\Facades\File::isDirectory($source)) {
+            return;
+        }
+
+        \Illuminate\Support\Facades\File::copyDirectory($source, $destination);
     }
 
     public function doesAnyProjectWorkspaceWorkflowExist(string $path): bool

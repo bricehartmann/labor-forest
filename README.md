@@ -23,6 +23,12 @@ php artisan native:build mac arm64
 - `<project>/.laborforest/ignored` - tracks workspace status, hold workflow run logs
 - `<project>/.laborforest/workflows` - holds workflows for the project
 
+## Using without committing `.laborforest` directory
+If you don't want to commit the `.laborforest` directory in your repo:
+1. Add `.laborforest` to `.git/info/exclude`
+2. Be sure to click `Continue without committing` after initializing a new project
+3. The workflows in the primary workspace will be automatically copied to new worktrees
+
 ## Sample workflows (Laravel)
 
 ### `up.yaml`
