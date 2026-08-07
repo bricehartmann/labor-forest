@@ -25,12 +25,7 @@ class WorkflowService
 {
     public function ensureLogFilePathDirectoryExists(string $workspacePath): string
     {
-        $path = implode(DIRECTORY_SEPARATOR, [
-            $workspacePath,
-            Directory::BASE->value,
-            Directory::IGNORED->value,
-            Directory::LOGS->value,
-        ]);
+        $path = $this->logsPath($workspacePath);
 
         if (! File::exists($path)) {
             File::makeDirectory($path);
@@ -142,18 +137,13 @@ class WorkflowService
      */
     public function loadWorkflowLogData(WorkspaceData $workspaceData): Collection
     {
-        $logsPath = implode(DIRECTORY_SEPARATOR, [
-            $workspaceData->path,
-            Directory::BASE->value,
-            Directory::IGNORED->value,
-            Directory::LOGS->value,
-        ]);
+        $logsPath = $this->logsPath($workspaceData->path);
 
         if (! File::isDirectory($logsPath)) {
             return collect();
         }
 
-        $fileNamePattern = '/^\d{8}T\d{6}Z_'.preg_quote($workspaceData->slugKebab(), '/').'_.+$/';
+        $fileNamePattern = $this->logFileNamePattern($workspaceData);
 
         return collect(File::files($logsPath))
             ->reject(fn (SplFileInfo $file) => $file->getExtension() !== FileExtension::YAML->value)
@@ -164,6 +154,48 @@ class WorkflowService
             ->filter()
             ->sortByDesc(fn (WorkflowRunLogData $data) => $data->timestamp)
             ->values();
+    }
+
+    /**
+     * Read a single run log by its id, which is the log file name without its extension.
+     *
+     * Returns null when the file is missing, unparseable, or malformed: logs are machine-written
+     * runtime artifacts flushed incrementally while a workflow is still running.
+     */
+    public function loadWorkflowLogDatum(WorkspaceData $workspaceData, string $id): ?WorkflowRunLogData
+    {
+        if (preg_match($this->logFileNamePattern($workspaceData), $id) !== 1) {
+            return null;
+        }
+
+        $path = $this->logsPath($workspaceData->path).DIRECTORY_SEPARATOR.$id.'.'.FileExtension::YAML->value;
+
+        if (! File::isFile($path)) {
+            return null;
+        }
+
+        $yaml = rescue(fn () => Yaml::parseFile($path));
+
+        if (! is_array($yaml) || ($yaml['resource_type'] ?? null) !== YamlResourceType::WORKFLOW_RUN_LOG->value) {
+            return null;
+        }
+
+        return rescue(fn () => WorkflowRunLogData::from($yaml));
+    }
+
+    private function logsPath(string $workspacePath): string
+    {
+        return implode(DIRECTORY_SEPARATOR, [
+            $workspacePath,
+            Directory::BASE->value,
+            Directory::IGNORED->value,
+            Directory::LOGS->value,
+        ]);
+    }
+
+    private function logFileNamePattern(WorkspaceData $workspaceData): string
+    {
+        return '/^\d{8}T\d{6}Z_'.preg_quote($workspaceData->slugKebab(), '/').'_.+$/';
     }
 
     /**

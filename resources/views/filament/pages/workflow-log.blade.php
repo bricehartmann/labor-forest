@@ -6,7 +6,7 @@
             class="mb-6"
         >
             <x-slot name="heading">
-                Issue Loading Project Workflows
+                Issue Loading Data
             </x-slot>
 
             <x-slot name="description">
@@ -14,6 +14,6 @@
             </x-slot>
         </x-filament::callout>
     @else
-        {{ $this->table }}
+        data
     @endif
 </x-filament-panels::page>

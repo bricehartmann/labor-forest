@@ -14,6 +14,7 @@ use App\Events\WorkflowStarted;
 use App\Services\ProjectsService;
 use App\Services\WorkflowService;
 use Exception;
+use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
@@ -21,6 +22,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\TextSize;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -191,7 +193,12 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
                 // ...
             ])
             ->recordActions([
-
+                Action::make('view')
+                    ->button()
+                    ->icon(Heroicon::Eye)
+                    ->label('View')
+                    ->color('info')
+                    ->url(fn (array $record) => WorkflowLog::getUrl(['uuid' => $this->projectData->uuid, 'slug' => $this->workspaceData->slugKebab(), 'id' => $record['id']])),
             ])
             ->toolbarActions([
                 BulkAction::make('delete')

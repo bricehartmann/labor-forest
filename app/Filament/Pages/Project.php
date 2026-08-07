@@ -583,6 +583,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->color('success'),
                 Action::make('logs')
                     ->button()
+                    ->icon(Heroicon::ListBullet)
                     ->label('Logs')
                     ->color('info')
                     ->url(fn (array $record) => ProjectWorkflows::getUrl(['uuid' => $this->projectData->uuid, 'slug' => WorkspaceData::from($record)->slugKebab()])),
