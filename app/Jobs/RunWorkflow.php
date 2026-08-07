@@ -22,6 +22,7 @@ use App\Events\WorkflowStepFinished;
 use App\Events\WorkflowStepOutputUpdated;
 use App\Events\WorkflowStepSkipped;
 use App\Events\WorkflowStepStarted;
+use App\Services\ProcessEnvironmentService;
 use App\Services\ProjectsService;
 use App\Services\VariableReplacementService;
 use App\Services\WorkflowService;
@@ -176,6 +177,7 @@ class RunWorkflow implements ShouldQueue
     protected function runSteps(WorkflowData $workflowData, ProjectData $projectData, WorkspaceData $workspaceData): bool
     {
         $replacementService = app(VariableReplacementService::class);
+        $environmentService = app(ProcessEnvironmentService::class);
 
         $allSuccessful = true;
 
@@ -202,18 +204,22 @@ class RunWorkflow implements ShouldQueue
                 ]);
             }
 
-            $env = [];
+            $stepEnv = [];
 
             if ($step->env) {
                 foreach ($step->env as $envKey => $envValue) {
-                    $env[$envKey] = $replacementService->replace($projectData, $workspaceData, $envValue);
+                    $stepEnv[$envKey] = $replacementService->replace($projectData, $workspaceData, $envValue);
                 }
 
                 Log::info('workflow: step env resolved', [
                     ...$stepContext,
-                    'env_keys' => array_keys($env),
+                    'env_keys' => array_keys($stepEnv),
                 ]);
             }
+
+            // this application's own environment must not reach the workspace, or a step running an
+            // artisan command there would pick up this application's .env instead of the workspace's
+            $env = $environmentService->sanitized($stepEnv);
 
             if (! $skipReason && $step->if) {
                 $if = $replacementService->replace(
@@ -225,7 +231,7 @@ class RunWorkflow implements ShouldQueue
                 Log::info('workflow: evaluating step if', [
                     ...$stepContext,
                     'if' => $if,
-                    'env' => $env,
+                    'env' => $stepEnv,
                 ]);
 
                 $ifProcess = $this->evaluateGate($if, $workspaceData->path, $env);
@@ -256,7 +262,7 @@ class RunWorkflow implements ShouldQueue
                 Log::info('workflow: evaluating step unless', [
                     ...$stepContext,
                     'unless' => $unless,
-                    'env' => $env,
+                    'env' => $stepEnv,
                 ]);
 
                 $unlessProcess = $this->evaluateGate($unless, $workspaceData->path, $env);
@@ -608,7 +614,7 @@ class RunWorkflow implements ShouldQueue
     /**
      * Run a step's if or unless command and return the finished process for exit code inspection.
      *
-     * @param  array<string, string>  $env
+     * @param  array<string, string|false>  $env  already sanitized by ProcessEnvironmentService
      */
     protected function evaluateGate(string $command, string $cwd, array $env): Process
     {

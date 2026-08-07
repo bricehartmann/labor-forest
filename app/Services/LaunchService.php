@@ -41,11 +41,16 @@ class LaunchService
             return;
         }
 
-        $process = Process::fromShellCommandline(app(VariableReplacementService::class)->replace(
-            projectData: $projectData,
-            workspaceData: $workspaceData,
-            content: $command,
-        ), $workspaceData->path);
+        $process = Process::fromShellCommandline(
+            command: app(VariableReplacementService::class)->replace(
+                projectData: $projectData,
+                workspaceData: $workspaceData,
+                content: $command,
+            ),
+            cwd: $workspaceData->path,
+            // a terminal or editor opened here must not inherit this application's environment
+            env: app(ProcessEnvironmentService::class)->sanitized(),
+        );
         $process->setOptions(['create_new_console' => true]);
         $process->start();
     }

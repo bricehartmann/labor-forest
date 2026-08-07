@@ -41,7 +41,7 @@ class GitService
             throw new RuntimeException('Branch must exist or base branch must be provided; mutually exclusive');
         }
 
-        $process = Process::fromShellCommandline($command, $mainWorktreePath);
+        $process = $this->gitProcess($command, $mainWorktreePath);
         $process->run();
 
         if (! $process->isSuccessful()) {
@@ -69,7 +69,7 @@ class GitService
         $removeWorktreeCommand = $force
             ? 'git worktree remove --force '.$worktreePath
             : 'git worktree remove '.$worktreePath;
-        $removeWorktreeProcess = Process::fromShellCommandline($removeWorktreeCommand, $worktreePath);
+        $removeWorktreeProcess = $this->gitProcess($removeWorktreeCommand, $worktreePath);
         $removeWorktreeProcess->run();
 
         if (! $removeWorktreeProcess->isSuccessful()) {
@@ -83,7 +83,7 @@ class GitService
         };
 
         if ($deleteBranchCommand) {
-            $deleteBranchProcess = Process::fromShellCommandline($deleteBranchCommand, $mainWorktreePath);
+            $deleteBranchProcess = $this->gitProcess($deleteBranchCommand, $mainWorktreePath);
             $deleteBranchProcess->run();
 
             if (! $deleteBranchProcess->isSuccessful()) {
@@ -99,7 +99,7 @@ class GitService
      */
     public function listWorktrees(string $projectPath): Collection
     {
-        $process = Process::fromShellCommandline('git worktree list --porcelain', $projectPath);
+        $process = $this->gitProcess('git worktree list --porcelain', $projectPath);
         $process->run();
 
         if (! $process->isSuccessful()) {
@@ -119,7 +119,7 @@ class GitService
      */
     public function listLocalBranches(string $projectPath): Collection
     {
-        $process = Process::fromShellCommandline("git for-each-ref --format='%(refname:short)' refs/heads", $projectPath);
+        $process = $this->gitProcess("git for-each-ref --format='%(refname:short)' refs/heads", $projectPath);
         $process->run();
 
         if (! $process->isSuccessful()) {
@@ -138,7 +138,7 @@ class GitService
      */
     public function status(string $projectPath): Collection
     {
-        $process = Process::fromShellCommandline('git status --porcelain', $projectPath);
+        $process = $this->gitProcess('git status --porcelain', $projectPath);
         $process->run();
 
         if (! $process->isSuccessful()) {
@@ -167,14 +167,14 @@ class GitService
      */
     public function commitAll(string $projectPath, string $message): void
     {
-        $stageProcess = Process::fromShellCommandline('git add --all', $projectPath);
+        $stageProcess = $this->gitProcess('git add --all', $projectPath);
         $stageProcess->run();
 
         if (! $stageProcess->isSuccessful()) {
             throw new GitOperationFailed('stage all changes', $stageProcess->getErrorOutput());
         }
 
-        $commitProcess = Process::fromShellCommandline('git commit --message '.escapeshellarg($message), $projectPath);
+        $commitProcess = $this->gitProcess('git commit --message '.escapeshellarg($message), $projectPath);
         $commitProcess->run();
 
         if (! $commitProcess->isSuccessful()) {
@@ -187,7 +187,7 @@ class GitService
      */
     public function currentBranch(string $projectPath): string
     {
-        $process = Process::fromShellCommandline('git rev-parse --abbrev-ref HEAD', $projectPath);
+        $process = $this->gitProcess('git rev-parse --abbrev-ref HEAD', $projectPath);
         $process->run();
 
         if (! $process->isSuccessful()) {
@@ -233,9 +233,21 @@ class GitService
 
     public function doesBranchExist(string $projectPath, string $branch): bool
     {
-        $process = Process::fromShellCommandline('git show-ref --verify --quiet "refs/heads/'.$branch.'"', $projectPath);
+        $process = $this->gitProcess('git show-ref --verify --quiet "refs/heads/'.$branch.'"', $projectPath);
         $process->run();
 
         return $process->isSuccessful();
+    }
+
+    /**
+     * Build a git process that runs without this application's own environment.
+     */
+    protected function gitProcess(string $command, string $cwd): Process
+    {
+        return Process::fromShellCommandline(
+            command: $command,
+            cwd: $cwd,
+            env: app(ProcessEnvironmentService::class)->sanitized(),
+        );
     }
 }
