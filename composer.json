@@ -14,6 +14,7 @@
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0",
         "nativephp/desktop": "^2.2",
+        "sensiolabs/ansi-to-html": "^2.0",
         "spatie/laravel-data": "^4.23",
         "vlucas/phpdotenv": "^5.6"
     },

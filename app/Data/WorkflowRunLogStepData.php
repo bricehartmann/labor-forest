@@ -8,6 +8,8 @@ use App\Enums\WorkflowStepType;
 use App\Rules\ValidVariables;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\HtmlString;
+use SensioLabs\AnsiConverter\AnsiToHtmlConverter;
 use Spatie\LaravelData\Attributes\WithCast;
 use Spatie\LaravelData\Casts\EnumCast;
 use Spatie\LaravelData\Data;
@@ -65,6 +67,15 @@ class WorkflowRunLogStepData extends Data
                 new ValidVariables,
             ],
         ];
+    }
+
+    public function outputHtml(): ?HtmlString
+    {
+        if (! $this->output) {
+            return null;
+        }
+
+        return new HtmlString((new AnsiToHtmlConverter)->convert($this->output));
     }
 
     public function status(): WorkflowStepStatus
