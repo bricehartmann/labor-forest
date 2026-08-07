@@ -499,7 +499,6 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                         }),
                     Action::make('launch_browser')
                         ->label('Browser')
-                        ->disabled(fn (array $record) => WorkspaceStatus::from($record['status']) === WorkspaceStatus::SUSPENDED)
                         ->hidden(empty($this->projectData->command_launch_browser) && empty($settings->command_launch_browser))
                         ->icon(Heroicon::OutlinedGlobeAlt)
                         ->action(function (array $record) {

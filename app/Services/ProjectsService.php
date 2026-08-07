@@ -59,7 +59,7 @@ class ProjectsService
     public function removeProject(string $uuid): void
     {
         $this->ensureBaseDirectoryExists();
-        $projects = $this->loadProjects()->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid);
+        $projects = $this->loadProjects()->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid)->values();
         $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
     }
 

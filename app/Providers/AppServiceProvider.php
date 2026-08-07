@@ -26,5 +26,10 @@ class AppServiceProvider extends ServiceProvider
             PanelsRenderHook::TOPBAR_END,
             fn (): View => view('filament.global.refresh'),
         );
+
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::BODY_END,
+            fn (): View => view('filament.global.workflow-notifications'),
+        );
     }
 }
