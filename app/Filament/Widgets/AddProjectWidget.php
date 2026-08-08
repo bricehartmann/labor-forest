@@ -38,10 +38,7 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
             ->label('Add project')
             ->color('success')
             ->action(function () {
-                $path = Dialog::new()
-                    ->title('Select Project Directory')
-                    ->folders()
-                    ->open();
+                $path = $this->selectProjectDirectory();
 
                 if (! $path) {
                     return;
@@ -61,5 +58,16 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
                     failureBody: fn (Throwable $th) => $th->getMessage(),
                 );
             });
+    }
+
+    /**
+     * The directory picker, isolated so a test can choose a path without opening a native dialog.
+     */
+    protected function selectProjectDirectory(): ?string
+    {
+        return Dialog::new()
+            ->title('Select Project Directory')
+            ->folders()
+            ->open();
     }
 }
