@@ -1,0 +1,13 @@
+resource_type: workflow
+require_status: suspended
+ending_status: ready
+sort_order: 7
+steps:
+    - name: 'Write the environment'
+      type: update_env
+      map:
+        APP_URL: 'http://{{ WORKSPACE_SLUG_KEBAB }}.test'
+    - name: 'Run the child workflow'
+      type: workflow
+      unless: 'test -f .skip'
+      run: up

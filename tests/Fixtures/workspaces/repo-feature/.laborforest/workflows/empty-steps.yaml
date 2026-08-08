@@ -1,0 +1,5 @@
+resource_type: workflow
+require_status: null
+ending_status: null
+sort_order: 50
+steps: []

@@ -41,17 +41,28 @@ class LaunchService
             return;
         }
 
-        $process = Process::fromShellCommandline(
+        $process = $this->launchProcess(
             command: app(VariableReplacementService::class)->replace(
                 projectData: $projectData,
                 workspaceData: $workspaceData,
                 content: $command,
             ),
             cwd: $workspaceData->path,
-            // a terminal or editor opened here must not inherit this application's environment
-            env: app(ProcessEnvironmentService::class)->sanitized(),
         );
         $process->setOptions(['create_new_console' => true]);
         $process->start();
+    }
+
+    /**
+     * Build the launch process, isolated as a test seam mirroring GitService::gitProcess().
+     */
+    protected function launchProcess(string $command, string $cwd): Process
+    {
+        return Process::fromShellCommandline(
+            command: $command,
+            cwd: $cwd,
+            // a terminal or editor opened here must not inherit this application's environment
+            env: app(ProcessEnvironmentService::class)->sanitized(),
+        );
     }
 }

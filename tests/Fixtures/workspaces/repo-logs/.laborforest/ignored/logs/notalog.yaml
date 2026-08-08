@@ -1,0 +1,8 @@
+resource_type: run_log
+id: notalog
+name: notalog
+parent: null
+timestamp: 1704585600
+status: success
+exception: null
+steps: []

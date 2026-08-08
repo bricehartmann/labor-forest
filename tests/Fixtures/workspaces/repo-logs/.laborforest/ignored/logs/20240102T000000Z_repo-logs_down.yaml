@@ -1,0 +1,14 @@
+resource_type: run_log
+id: 20240102T000000Z_repo-logs_down
+name: down
+parent: 20240101T000000Z_repo-logs_up
+timestamp: 1704153600
+status: failed
+exception: 'Step [Stop the containers] failed.'
+steps:
+    - name: 'Stop the containers'
+      type: shell
+      exitCode: 1
+      output: "boom\n"
+      run: 'docker compose down'
+      hash: bbb222

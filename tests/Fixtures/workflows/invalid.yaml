@@ -1,0 +1,8 @@
+resource_type: workflow
+require_status: nonsense
+ending_status: nonsense
+sort_order: 0
+steps:
+    - name: 'Build'
+      type: shell
+      run: 'true'

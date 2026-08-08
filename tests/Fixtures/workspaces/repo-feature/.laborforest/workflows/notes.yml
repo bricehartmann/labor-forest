@@ -1,0 +1,6 @@
+resource_type: workflow
+sort_order: 2
+steps:
+    - name: 'Wrong extension'
+      type: shell
+      run: 'true'
