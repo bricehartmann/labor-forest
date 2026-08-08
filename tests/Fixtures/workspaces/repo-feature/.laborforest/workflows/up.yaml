@@ -1,0 +1,12 @@
+resource_type: workflow
+require_status: suspended
+ending_status: ready
+sort_order: 0
+steps:
+    - name: 'Copy .env file'
+      type: shell
+      if: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"'
+      run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env'
+    - name: 'Install dependencies'
+      type: shell
+      run: 'composer install'

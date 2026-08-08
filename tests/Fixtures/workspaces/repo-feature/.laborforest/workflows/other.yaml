@@ -1,0 +1,6 @@
+resource_type: run_log
+sort_order: 1
+steps:
+    - name: 'Never loaded'
+      type: shell
+      run: 'true'

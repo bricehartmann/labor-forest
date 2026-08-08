@@ -1,0 +1,14 @@
+resource_type: run_log
+id: 20240101T000000Z_repo-logs_up
+name: up
+parent: null
+timestamp: 1704067200
+status: success
+exception: null
+steps:
+    - name: 'Copy .env file'
+      type: shell
+      exitCode: 0
+      output: "copied\n"
+      run: 'cp .env.example .env'
+      hash: aaa111
