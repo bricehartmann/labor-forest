@@ -223,13 +223,33 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->closeModalByClickingAway(false)
             ->closeModalByEscaping(false)
             ->modalCloseButton(false)
-            ->modalWidth(Width::Medium)
+            ->modalWidth(Width::Large)
             ->modalIcon(Heroicon::OutlinedExclamationTriangle)
             ->modalHeading('Repository is now dirty')
-            ->modalDescription(new HtmlString('The <code class="text-red-600">'.Directory::BASE->value.'</code> directory has been created inside this project, so the repository now has uncommitted changes.<br/><br/>You can commit them now or handle them yourself later.'))
+            ->modalDescription(new HtmlString('The <code class="text-red-600">'.Directory::BASE->value.'</code> directory has been created inside this project, so the repository now has uncommitted changes.<br/><br/>You can commit them now, exclude the directory from this repository locally, or handle them yourself later.'))
             ->modalSubmitActionLabel('Commit all changes')
-            ->modalCancelActionLabel('Continue without committing')
+            ->modalCancelActionLabel('Do nothing')
             ->modalFooterActionsAlignment(Alignment::End)
+            ->extraModalFooterActions([
+                Action::make('addToGitInfoExclude')
+                    ->label('Add to .git/info/exclude')
+                    ->color('info')
+                    ->cancelParentActions()
+                    ->action(function () {
+                        static::resultNotificationOperation(
+                            callback: function () {
+                                app(GitService::class)->addToGitInfoExclude(
+                                    $this->projectData->path,
+                                    DIRECTORY_SEPARATOR.Directory::BASE->value.DIRECTORY_SEPARATOR,
+                                );
+
+                                $this->reloadData();
+                            },
+                            successTitle: 'Added to .git/info/exclude',
+                            failureBody: fn (Throwable $th) => $th->getMessage(),
+                        );
+                    }),
+            ])
             ->fillForm(fn () => [
                 'commit_message' => 'initialize LaborForest',
             ])
@@ -367,7 +387,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     {
         return rescue(fn () => app(ProjectsService::class)
             ->listExampleWorkflowPaths()
-            ->mapWithKeys(fn (string $path) => [$path => match(true) {
+            ->mapWithKeys(fn (string $path) => [$path => match (true) {
                 basename($path) === 'javascript' => 'JavaScript',
                 default => ucwords(basename($path)),
             }])

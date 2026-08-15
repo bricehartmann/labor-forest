@@ -383,6 +383,86 @@ describe('commitAll', function () {
     });
 });
 
+describe('addToGitInfoExclude', function () {
+    beforeEach(function () {
+        $this->excludePath = '/tmp/repo/.git/info/exclude';
+        $this->excludeContents = null;
+        $this->ensuredDirectories = [];
+        $this->appended = [];
+
+        $this->git->responses = [['ok' => true, 'out' => ".git\n"]];
+
+        File::shouldReceive('isFile')
+            ->andReturnUsing(fn (string $path): bool => $path === $this->excludePath && $this->excludeContents !== null);
+
+        File::shouldReceive('get')
+            ->andReturnUsing(fn (string $path): string => $this->excludeContents ?? '');
+
+        File::shouldReceive('ensureDirectoryExists')
+            ->andReturnUsing(function (string $path): void {
+                $this->ensuredDirectories[] = $path;
+            });
+
+        File::shouldReceive('append')
+            ->andReturnUsing(function (string $path, string $contents): int {
+                $this->appended[] = [$path, $contents];
+
+                return strlen($contents);
+            });
+    });
+
+    it('appends the entry to the exclude file', function () {
+        $this->excludeContents = "node_modules/\n";
+
+        $this->git->addToGitInfoExclude($this->repo, '/.laborforest/');
+
+        expect($this->git->commands)->toBe([['git rev-parse --git-common-dir', $this->repo]])
+            ->and($this->ensuredDirectories)->toBe(['/tmp/repo/.git/info'])
+            ->and($this->appended)->toBe([[$this->excludePath, '/.laborforest/'.PHP_EOL]]);
+    });
+
+    it('creates the exclude file when the repository has none', function () {
+        $this->git->addToGitInfoExclude($this->repo, '/.laborforest/');
+
+        expect($this->ensuredDirectories)->toBe(['/tmp/repo/.git/info'])
+            ->and($this->appended)->toBe([[$this->excludePath, '/.laborforest/'.PHP_EOL]]);
+    });
+
+    it('uses the absolute directory git reports for a linked worktree', function () {
+        $this->git->responses = [['ok' => true, 'out' => "/tmp/repo/.git\n"]];
+
+        $this->git->addToGitInfoExclude($this->worktree, '/.laborforest/');
+
+        expect($this->git->commands)->toBe([['git rev-parse --git-common-dir', $this->worktree]])
+            ->and($this->appended)->toBe([[$this->excludePath, '/.laborforest/'.PHP_EOL]]);
+    });
+
+    it('separates the entry when the exclude file has no trailing newline', function () {
+        $this->excludeContents = 'node_modules/';
+
+        $this->git->addToGitInfoExclude($this->repo, '/.laborforest/');
+
+        expect($this->appended)->toBe([[$this->excludePath, PHP_EOL.'/.laborforest/'.PHP_EOL]]);
+    });
+
+    it('writes nothing when the entry is already present', function () {
+        $this->excludeContents = "node_modules/\n/.laborforest/\n";
+
+        $this->git->addToGitInfoExclude($this->repo, '/.laborforest/');
+
+        expect($this->appended)->toBe([])
+            ->and($this->ensuredDirectories)->toBe([]);
+    });
+
+    it('throws and writes nothing when the git directory cannot be located', function () {
+        $this->git->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
+
+        expect(fn () => $this->git->addToGitInfoExclude($this->repo, '/.laborforest/'))
+            ->toThrow(GitOperationFailed::class, 'Failed to locate the git directory: fatal: not a git repository')
+            ->and($this->appended)->toBe([]);
+    });
+});
+
 describe('currentBranch', function () {
     it('returns the trimmed branch name', function () {
         $this->git->responses = [['ok' => true, 'out' => "feature/x\n"]];
@@ -417,6 +497,20 @@ describe('doesBranchExist', function () {
         $this->git->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
 
         expect($this->git->doesBranchExist($this->repo, 'nope'))->toBeFalse();
+    });
+});
+
+describe('isGitRepository', function () {
+    it('is true when git resolves the repository', function () {
+        expect($this->git->isGitRepository($this->repo))->toBeTrue()
+            ->and($this->git->commands)->toBe([['git rev-parse --git-common-dir', $this->repo]]);
+    });
+
+    it('is false when the directory is not a repository', function () {
+        $this->git->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
+
+        expect($this->git->isGitRepository('/tmp/plain'))->toBeFalse()
+            ->and($this->git->commands)->toBe([['git rev-parse --git-common-dir', '/tmp/plain']]);
     });
 });
 

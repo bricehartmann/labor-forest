@@ -221,7 +221,7 @@ describe('updateProject', function () {
 
 describe('addProject', function () {
     it('appends the project and initializes its base directory', function () {
-        $this->directories = [$this->repo, $this->repo.'/.git'];
+        $this->directories = [$this->repo];
 
         $project = $this->projects->addProject($this->repo);
 
@@ -237,14 +237,17 @@ describe('addProject', function () {
                 'command_launch_browser' => null,
                 'command_launch_terminal' => null,
             ]])
-            ->and($this->git->commands)->toBe([['git status --porcelain', $this->repo]])
+            ->and($this->git->commands)->toBe([
+                ['git rev-parse --git-common-dir', $this->repo],
+                ['git status --porcelain', $this->repo],
+            ])
             ->and($this->directories)->toContain('/tmp/repo/.laborforest', '/tmp/repo/.laborforest/ignored')
             ->and($this->files['/tmp/repo/.laborforest/ignored/.gitignore'])->toBe("*\n!.gitignore\n")
             ->and($this->files['/tmp/repo/.laborforest/ignored/status.yaml'])->toBe("status: suspended\n");
     });
 
     it('writes a mapping instead of a list when the stored projects are not already sorted', function () {
-        $this->directories = [$this->repo, $this->repo.'/.git'];
+        $this->directories = [$this->repo];
         $this->disk->put($this->path, projectsFile([
             projectEntry($this->uuid, '/tmp/one', 100),
             projectEntry(secondUuid(), '/tmp/two', 200),
@@ -274,24 +277,28 @@ describe('addProject', function () {
             ->and($this->git->commands)->toBe([]);
     });
 
-    it('throws before running git when the directory is not a git repository', function () {
+    it('throws before checking the status when git does not recognize the directory as a repository', function () {
         $this->directories = [$this->repo];
+        $this->git->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
 
         expect(fn () => $this->projects->addProject($this->repo))
             ->toThrow(ProjectDirectoryNotGitRepository::class, "Project with directory '/tmp/repo' is not a git repository.")
             ->and($this->disk->get($this->path))->toBe('')
-            ->and($this->git->commands)->toBe([]);
+            ->and($this->git->commands)->toBe([['git rev-parse --git-common-dir', $this->repo]]);
     });
 
     it('throws before writing anything when the repository has uncommitted changes', function () {
-        $this->directories = [$this->repo, $this->repo.'/.git'];
-        $this->git->responses = [['ok' => true, 'out' => "?? a.php\n"]];
+        $this->directories = [$this->repo];
+        $this->git->responses = [
+            ['ok' => true],
+            ['ok' => true, 'out' => "?? a.php\n"],
+        ];
 
         expect(fn () => $this->projects->addProject($this->repo))
             ->toThrow(GitStatusNotClean::class, "Project with directory '/tmp/repo' has uncommitted changes. Commit or stash them before adding the project.")
             ->and($this->disk->get($this->path))->toBe('')
-            ->and($this->git->commands)->toHaveCount(1)
-            ->and($this->directories)->toBe([$this->repo, $this->repo.'/.git']);
+            ->and($this->git->commands)->toHaveCount(2)
+            ->and($this->directories)->toBe([$this->repo]);
     });
 });
 

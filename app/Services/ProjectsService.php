@@ -104,7 +104,7 @@ class ProjectsService
             throw new ProjectDirectoryExists($path);
         }
 
-        if (! \Illuminate\Support\Facades\File::isDirectory($path.DIRECTORY_SEPARATOR.'.git')) {
+        if (! app(GitService::class)->isGitRepository($path)) {
             throw new ProjectDirectoryNotGitRepository($path);
         }
 

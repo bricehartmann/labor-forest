@@ -4,11 +4,12 @@ namespace App\Services;
 
 use App\Data\GitStatusEntryData;
 use App\Data\WorktreeData;
+use App\Enums\Directory;
+use App\Enums\File;
 use App\Exceptions\GitBranchDoesNotExist;
 use App\Exceptions\GitOperationFailed;
 use App\Exceptions\WorkspaceDirectoryExists;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Process;
@@ -27,7 +28,7 @@ class GitService
         string $branch,
         ?string $baseBranch,
     ): WorktreeData {
-        if (File::exists($newWorktreePath)) {
+        if (\Illuminate\Support\Facades\File::exists($newWorktreePath)) {
             throw new WorkspaceDirectoryExists($newWorktreePath);
         }
 
@@ -183,6 +184,34 @@ class GitService
     }
 
     /**
+     * Append an ignore entry to the repository's own exclude file, which keeps the entry local to
+     * this clone instead of committing it. Doing so twice is a no-op.
+     *
+     * @throws GitOperationFailed
+     */
+    public function addToGitInfoExclude(string $projectPath, string $entry): void
+    {
+        $excludePath = $this->gitCommonDirectory($projectPath)
+            .DIRECTORY_SEPARATOR.Directory::GIT_INFO->value
+            .DIRECTORY_SEPARATOR.File::GIT_EXCLUDE->value;
+
+        $contents = \Illuminate\Support\Facades\File::isFile($excludePath)
+            ? \Illuminate\Support\Facades\File::get($excludePath)
+            : '';
+
+        $entry = trim($entry);
+
+        if (collect(explode("\n", $contents))->map(trim(...))->contains($entry)) {
+            return;
+        }
+
+        $separator = ($contents === '' || str_ends_with($contents, "\n")) ? '' : PHP_EOL;
+
+        \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($excludePath));
+        \Illuminate\Support\Facades\File::append($excludePath, $separator.$entry.PHP_EOL);
+    }
+
+    /**
      * @throws GitOperationFailed
      */
     public function currentBranch(string $projectPath): string
@@ -237,6 +266,37 @@ class GitService
         $process->run();
 
         return $process->isSuccessful();
+    }
+
+    public function isGitRepository(string $path): bool
+    {
+        $process = $this->gitProcess('git rev-parse --git-common-dir', $path);
+        $process->run();
+
+        return $process->isSuccessful();
+    }
+
+    /**
+     * Resolve the repository's common git directory, which is not always a `.git` directory inside
+     * the given path: linked worktrees and submodules point elsewhere, and git reports that path
+     * as absolute while an ordinary checkout reports it relative to the working directory.
+     *
+     * @throws GitOperationFailed
+     */
+    protected function gitCommonDirectory(string $projectPath): string
+    {
+        $process = $this->gitProcess('git rev-parse --git-common-dir', $projectPath);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new GitOperationFailed('locate the git directory', $process->getErrorOutput());
+        }
+
+        $gitDirectory = trim($process->getOutput());
+
+        return str_starts_with($gitDirectory, DIRECTORY_SEPARATOR)
+            ? $gitDirectory
+            : $projectPath.DIRECTORY_SEPARATOR.$gitDirectory;
     }
 
     /**

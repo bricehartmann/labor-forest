@@ -141,6 +141,47 @@ describe('projectCreated action', function () {
             ->assertNotified('Changes committed');
     });
 
+    it('adds the base directory to the exclude file instead of committing', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+        );
+
+        $services['git']->shouldReceive('addToGitInfoExclude')->once()->with($this->projectPath, '/.laborforest/');
+        $services['git']->shouldNotReceive('commitAll');
+
+        session()->put(SessionKey::PROJECT_CREATED->value, $this->uuid);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionMounted('projectCreated')
+            ->mountAction('addToGitInfoExclude')
+            ->callMountedAction()
+            ->assertNotified('Added to .git/info/exclude')
+            ->assertActionNotMounted('projectCreated');
+    });
+
+    it('reports a failed exclude and does not reload the project', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+            loadProjectTimes: 1,
+        );
+
+        $services['git']
+            ->shouldReceive('addToGitInfoExclude')
+            ->andThrow(new GitOperationFailed('locate the git directory', 'fatal: not a git repository'));
+
+        session()->put(SessionKey::PROJECT_CREATED->value, $this->uuid);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionMounted('projectCreated')
+            ->mountAction('addToGitInfoExclude')
+            ->callMountedAction()
+            ->assertNotified('Whoops! Something went wrong.');
+    });
+
     it('reports a failed commit and does not reload the project', function () {
         $services = projectPageServices(
             project: $this->project,
