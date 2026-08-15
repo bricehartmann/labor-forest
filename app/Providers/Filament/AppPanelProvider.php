@@ -32,7 +32,7 @@ class AppPanelProvider extends PanelProvider
         return $panel
             ->default()
             ->id('app')
-            ->brandName('🌲 LaborForest')
+            ->brandName('💪🌲 LaborForest')
             ->path('')
             ->viteTheme('resources/css/filament/app/theme.css')
             ->when(
