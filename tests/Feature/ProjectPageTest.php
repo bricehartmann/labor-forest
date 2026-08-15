@@ -18,6 +18,9 @@ use App\Services\ProjectsService;
 use App\Services\SettingsService;
 use App\Services\WorkflowService;
 use Filament\Actions\Testing\TestAction;
+use Filament\Forms\Components\Select;
+use Filament\Notifications\Notification;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
@@ -360,8 +363,8 @@ describe('launch record actions', function () {
     });
 });
 
-describe('create_starter_workflows record action', function () {
-    it('seeds the starter workflows into the workspace', function () {
+describe('create_example_workflows record action', function () {
+    it('copies the selected example set into the workspace', function () {
         $services = projectPageServices(
             project: $this->project,
             workspaces: [$this->workspace],
@@ -371,11 +374,61 @@ describe('create_starter_workflows record action', function () {
         $services['projects']
             ->shouldReceive('initializeWorkspaceStarterWorkflows')
             ->once()
-            ->with($this->workspacePath);
+            ->with($this->workspacePath, 'example-workflows/laravel');
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->callAction(TestAction::make('create_starter_workflows')->table('0'))
-            ->assertNotified('Workflows created: up & down');
+            ->callAction(TestAction::make('create_example_workflows')->table('0'), [
+                'example_path' => 'example-workflows/laravel',
+            ])
+            ->assertNotified(
+                Notification::make()
+                    ->success()
+                    ->title('Example workflows created')
+                    ->icon(Heroicon::CheckCircle)
+            );
+    });
+
+    it('warns that the copied workflows made the git branch dirty', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [componentWorkspaceData($this->workspacePath, gitStatus: GitStatus::DIRTY)],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']
+            ->shouldReceive('initializeWorkspaceStarterWorkflows')
+            ->once()
+            ->with($this->workspacePath, 'example-workflows/laravel');
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction(TestAction::make('create_example_workflows')->table('0'), [
+                'example_path' => 'example-workflows/laravel',
+            ])
+            ->assertNotified(
+                Notification::make()
+                    ->success()
+                    ->title('Example workflows created')
+                    ->body('Git branch is now dirty!')
+                    ->icon(Heroicon::CheckCircle)
+            );
+    });
+
+    it('offers every bundled example set, labelled by its directory name', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+            exampleWorkflowPaths: ['example-workflows/bare', 'example-workflows/laravel', 'example-workflows/vite'],
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->mountAction(TestAction::make('create_example_workflows')->table('0'))
+            ->assertFormFieldExists('example_path', fn (Select $field) => $field->getOptions() === [
+                'example-workflows/bare' => 'Bare',
+                'example-workflows/laravel' => 'Laravel',
+                'example-workflows/vite' => 'Vite',
+            ] && ! $field->canSelectPlaceholder() && ! $field->isNative())
+            ->assertActionDataSet(['example_path' => 'example-workflows/bare']);
     });
 
     it('is hidden once the workspace already has a workflow', function () {
@@ -387,10 +440,10 @@ describe('create_starter_workflows record action', function () {
         );
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->assertActionHidden(TestAction::make('create_starter_workflows')->table('0'));
+            ->assertActionHidden(TestAction::make('create_example_workflows')->table('0'));
     });
 
-    it('reports a failed seed and does not reload the project', function () {
+    it('reports a failed copy and does not reload the project', function () {
         $services = projectPageServices(
             project: $this->project,
             workspaces: [$this->workspace],
@@ -404,7 +457,9 @@ describe('create_starter_workflows record action', function () {
             ->andThrow(new RuntimeException('unable to create .laborforest/workflows'));
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->callAction(TestAction::make('create_starter_workflows')->table('0'))
+            ->callAction(TestAction::make('create_example_workflows')->table('0'), [
+                'example_path' => 'example-workflows/laravel',
+            ])
             ->assertNotified('Whoops! Something went wrong.');
     });
 });
@@ -659,6 +714,7 @@ describe('onProjectDataUpdated listener', function () {
  * @param  array<int, WorkspaceData>  $workspaces
  * @param  array<string, WorkflowData>  $workflows
  * @param  array<int, string>  $branches
+ * @param  array<int, string>  $exampleWorkflowPaths
  * @return array{projects: MockInterface, workflows: MockInterface, settings: MockInterface, git: MockInterface, launch: MockInterface}
  */
 function projectPageServices(
@@ -671,6 +727,7 @@ function projectPageServices(
     array $branches = ['develop', 'main'],
     string $currentBranch = 'main',
     ?int $loadProjectTimes = null,
+    array $exampleWorkflowPaths = ['example-workflows/bare', 'example-workflows/laravel'],
 ): array {
     $settings ??= new SettingsData;
 
@@ -681,6 +738,7 @@ function projectPageServices(
         $anyWorkflowExists,
         $loadProjectThrows,
         $loadProjectTimes,
+        $exampleWorkflowPaths,
     ) {
         $loadProject = $mock->shouldReceive('loadProject');
 
@@ -697,6 +755,7 @@ function projectPageServices(
         $mock->shouldReceive('loadProjectWorkspaces')->andReturn(collect($workspaces));
         $mock->shouldReceive('listProjectLocalBranches')->andReturn(collect($branches));
         $mock->shouldReceive('doesAnyProjectWorkspaceWorkflowExist')->andReturn($anyWorkflowExists);
+        $mock->shouldReceive('listExampleWorkflowPaths')->andReturn(collect($exampleWorkflowPaths));
     });
 
     $workflowsMock = projectPageMock(WorkflowService::class, function (MockInterface $mock) use ($workflows) {

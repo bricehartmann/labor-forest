@@ -350,6 +350,27 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->all(), []);
     }
 
+    /**
+     * The git status of a workspace as of the most recent load of the project data.
+     */
+    protected function workspaceGitStatus(string $path): GitStatus
+    {
+        $workspace = collect($this->workspaces)->firstWhere('path', $path);
+
+        return GitStatus::tryFrom($workspace['git_status'] ?? '') ?? GitStatus::UNKNOWN;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function exampleWorkflowOptions(): array
+    {
+        return rescue(fn () => app(ProjectsService::class)
+            ->listExampleWorkflowPaths()
+            ->mapWithKeys(fn (string $path) => [$path => ucwords(basename($path))])
+            ->all(), []);
+    }
+
     public function removeAction(): Action
     {
         return Action::make('remove')
@@ -523,18 +544,39 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->label('Launch')
                     ->color('info'),
                 ActionGroup::make([
-                    Action::make('create_starter_workflows')
+                    Action::make('create_example_workflows')
                         ->hidden(fn (array $record) => app(ProjectsService::class)->doesAnyProjectWorkspaceWorkflowExist($record['path']))
-                        ->label('Create starter workflows')
+                        ->label('Create example workflows')
                         ->icon(Heroicon::SquaresPlus)
-                        ->action(function (array $record) {
+                        ->modal()
+                        ->modalWidth(Width::Small)
+                        ->modalHeading('Create Example Workflows')
+                        ->modalDescription('Select the set of example workflows to copy into this workspace.')
+                        ->modalSubmitActionLabel('Create')
+                        ->modalCancelActionLabel('Cancel')
+                        ->modalFooterActionsAlignment(Alignment::End)
+                        ->schema([
+                            Select::make('example_path')
+                                ->label('Example')
+                                ->options(fn () => $this->exampleWorkflowOptions())
+                                ->default(fn () => array_key_first($this->exampleWorkflowOptions()))
+                                ->selectablePlaceholder(false)
+                                ->native(false)
+                                ->required(),
+                        ])
+                        ->action(function (array $record, array $data) {
                             static::resultNotificationOperation(
-                                callback: function () use ($record) {
-                                    app(ProjectsService::class)->initializeWorkspaceStarterWorkflows($record['path']);
+                                callback: function () use ($record, $data): GitStatus {
+                                    app(ProjectsService::class)->initializeWorkspaceStarterWorkflows($record['path'], $data['example_path']);
 
                                     $this->reloadData();
+
+                                    return $this->workspaceGitStatus($record['path']);
                                 },
-                                successTitle: 'Workflows created: up & down',
+                                successTitle: 'Example workflows created',
+                                successBody: fn (GitStatus $gitStatus) => $gitStatus === GitStatus::DIRTY
+                                    ? 'Git branch is now dirty!'
+                                    : null,
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
                             );
                         }),

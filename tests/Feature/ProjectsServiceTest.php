@@ -15,6 +15,7 @@ use App\Exceptions\WorkspaceDirectoryExists;
 use App\Exceptions\WorkspaceNotFound;
 use App\Services\GitService;
 use App\Services\ProjectsService;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
@@ -26,6 +27,7 @@ use Tests\Fakes\FakeGitService;
 
 beforeEach(function () {
     $this->disk = Storage::fake('user_home');
+    $this->extras = Storage::fake('extras');
     $this->path = '.laborforest/projects.yaml';
     $this->projects = new ProjectsService;
     $this->repo = '/tmp/repo';
@@ -635,52 +637,73 @@ describe('loadProjects', function () {
     });
 });
 
-describe('initializeWorkspaceStarterWorkflows', function () {
-    it('writes the starter up and down workflows', function () {
-        $this->directories = [$this->worktree];
+describe('listExampleWorkflowPaths', function () {
+    it('returns every example set directory in order', function () {
+        exampleWorkflowSet($this->extras, 'laravel');
+        exampleWorkflowSet($this->extras, 'bare');
+        exampleWorkflowSet($this->extras, 'vite');
 
-        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree);
+        expect($this->projects->listExampleWorkflowPaths()->all())->toBe([
+            'example-workflows/bare',
+            'example-workflows/laravel',
+            'example-workflows/vite',
+        ]);
+    });
+
+    it('returns nothing when no example sets are bundled', function () {
+        expect($this->projects->listExampleWorkflowPaths()->all())->toBe([]);
+    });
+});
+
+describe('initializeWorkspaceStarterWorkflows', function () {
+    it('copies every workflow of the example set into the workspace', function () {
+        $this->directories = [$this->worktree];
+        exampleWorkflowSet($this->extras, 'laravel', ['up', 'down', 'refresh']);
+
+        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel');
 
         expect($this->directories)->toBe([
             $this->worktree,
             '/tmp/repo-feature/.laborforest',
             '/tmp/repo-feature/.laborforest/workflows',
         ])
-            ->and(Yaml::parse($this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml']))->toBe([
-                'resource_type' => 'workflow',
-                'require_status' => 'suspended',
-                'ending_status' => 'ready',
-                'sort_order' => 0,
-                'steps' => [[
-                    'name' => 'Copy .env file',
-                    'type' => 'shell',
-                    'if' => 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"',
-                    'run' => 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env',
-                ]],
+            ->and(collect($this->files)->keys()->sort()->values()->all())->toBe([
+                '/tmp/repo-feature/.laborforest/workflows/down.yaml',
+                '/tmp/repo-feature/.laborforest/workflows/refresh.yaml',
+                '/tmp/repo-feature/.laborforest/workflows/up.yaml',
             ])
-            ->and(Yaml::parse($this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml']))->toBe([
-                'resource_type' => 'workflow',
-                'require_status' => 'ready',
-                'ending_status' => 'suspended',
-                'sort_order' => 100,
-                'steps' => [],
-            ]);
+            ->and($this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml'])
+            ->toBe(exampleWorkflowYaml('up'));
+    });
+
+    it('ignores files that are not workflow yaml', function () {
+        $this->directories = [$this->worktree];
+        exampleWorkflowSet($this->extras, 'laravel');
+        $this->extras->put('example-workflows/laravel/notes.yaml', "resource_type: run_log\n");
+        $this->extras->put('example-workflows/laravel/broken.yaml', "resource_type: [\n");
+        $this->extras->put('example-workflows/laravel/readme.txt', 'resource_type: workflow');
+
+        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel');
+
+        expect(collect($this->files)->keys()->all())->toBe(['/tmp/repo-feature/.laborforest/workflows/up.yaml']);
     });
 
     it('never overwrites a workflow that already exists', function () {
         $this->directories = [$this->worktree, '/tmp/repo-feature/.laborforest', '/tmp/repo-feature/.laborforest/workflows'];
         $this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml'] = "resource_type: workflow\n";
-        $this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml'] = "resource_type: workflow\n";
+        exampleWorkflowSet($this->extras, 'laravel', ['up', 'down']);
 
-        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree);
+        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel');
 
         expect($this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml'])->toBe("resource_type: workflow\n")
-            ->and($this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml'])->toBe("resource_type: workflow\n")
+            ->and($this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml'])->toBe(exampleWorkflowYaml('down'))
             ->and($this->directories)->toHaveCount(3);
     });
 
     it('throws when the workspace directory does not exist', function () {
-        expect(fn () => $this->projects->initializeWorkspaceStarterWorkflows($this->worktree))
+        exampleWorkflowSet($this->extras, 'laravel');
+
+        expect(fn () => $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel'))
             ->toThrow(ProjectDirectoryNotFound::class, "Project directory '/tmp/repo-feature' not found.")
             ->and($this->files)->toBe([])
             ->and($this->directories)->toBe([]);
@@ -815,4 +838,24 @@ function workflowFileInfo(string $name): SplFileInfo
     $relativePath = implode(DIRECTORY_SEPARATOR, ['.laborforest', 'workflows', $name]);
 
     return new SplFileInfo(projectFixturePath('workflows'.DIRECTORY_SEPARATOR.$relativePath), '.laborforest'.DIRECTORY_SEPARATOR.'workflows', $relativePath);
+}
+
+/**
+ * The contents of one bundled example workflow, distinct per name so a copy can be matched to its source.
+ */
+function exampleWorkflowYaml(string $name): string
+{
+    return "resource_type: workflow\nsort_order: 0\nsteps:\n  - name: '".$name."'\n    type: shell\n    run: 'true'\n";
+}
+
+/**
+ * Seed a set of example workflows onto the faked extras disk.
+ *
+ * @param  array<int, string>  $names
+ */
+function exampleWorkflowSet(Filesystem $extras, string $set, array $names = ['up']): void
+{
+    foreach ($names as $name) {
+        $extras->put('example-workflows'.DIRECTORY_SEPARATOR.$set.DIRECTORY_SEPARATOR.$name.'.yaml', exampleWorkflowYaml($name));
+    }
 }

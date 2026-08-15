@@ -1,0 +1,11 @@
+resource_type: workflow
+require_status: ready
+ending_status: ready
+sort_order: 1
+steps:
+  - name: 'Run fresh migrations'
+    type: shell
+    run: 'php artisan -vvv migrate:fresh'
+  - name: 'Run database seeder'
+    type: shell
+    run: 'php artisan -vvv db:seed'

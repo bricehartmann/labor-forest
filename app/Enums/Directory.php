@@ -8,4 +8,5 @@ enum Directory: string
     case IGNORED = 'ignored';
     case WORKFLOWS = 'workflows';
     case LOGS = 'logs';
+    case EXAMPLE_WORKFLOWS = 'example-workflows';
 }

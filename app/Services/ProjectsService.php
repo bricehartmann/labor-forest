@@ -4,8 +4,6 @@ namespace App\Services;
 
 use App\Concerns\Services\ManagesFiles;
 use App\Data\ProjectData;
-use App\Data\WorkflowData;
-use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Data\WorkspaceStatusData;
 use App\Data\WorktreeData;
@@ -14,7 +12,6 @@ use App\Enums\Disk;
 use App\Enums\File;
 use App\Enums\FileExtension;
 use App\Enums\GitStatus;
-use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\GitOperationFailed;
@@ -26,6 +23,7 @@ use App\Exceptions\ProjectDirectoryNotGitRepository;
 use App\Exceptions\ProjectNotFound;
 use App\Exceptions\WorkspaceNotFound;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Finder\SplFileInfo;
@@ -324,7 +322,23 @@ class ProjectsService
         }
     }
 
-    public function initializeWorkspaceStarterWorkflows(string $path): void
+    /**
+     * Disk-relative directory paths of the bundled example workflow sets.
+     *
+     * @return Collection<int, string>
+     */
+    public function listExampleWorkflowPaths(): Collection
+    {
+        return collect(Storage::disk(Disk::EXTRAS->value)->directories(Directory::EXAMPLE_WORKFLOWS->value))
+            ->sort()
+            ->values();
+    }
+
+    /**
+     * Copy every workflow of the given example set into the workspace, leaving any
+     * workflow that already exists untouched.
+     */
+    public function initializeWorkspaceStarterWorkflows(string $path, string $examplePath): void
     {
         $pathBaseDir = $this->ensureProjectBaseDirectoryExists($path);
 
@@ -334,37 +348,24 @@ class ProjectsService
             \Illuminate\Support\Facades\File::makeDirectory($pathWorkflowsDir);
         }
 
-        $pathWorkflowUp = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_UP->value;
+        $disk = Storage::disk(Disk::EXTRAS->value);
 
-        if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowUp)) {
-            $stepCopyEnv = new WorkflowStepData(
-                name: 'Copy .env file',
-                type: WorkflowStepType::SHELL,
-                if: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"',
-                run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env'
-            );
-            $workflowUp = new WorkflowData(
-                require_status: WorkspaceStatus::SUSPENDED,
-                ending_status: WorkspaceStatus::READY,
-                sort_order: 0,
-                steps: collect([$stepCopyEnv]),
-            );
+        collect($disk->files($examplePath))
+            ->filter(fn (string $file) => Str::afterLast($file, '.') === FileExtension::YAML->value)
+            ->filter(function (string $file) use ($disk) {
+                $yaml = rescue(fn () => Yaml::parse($disk->get($file) ?? ''));
 
-            \Illuminate\Support\Facades\File::put($pathWorkflowUp, Yaml::dump($workflowUp->toArray(), inline: 10));
-        }
+                return is_array($yaml) && ($yaml['resource_type'] ?? null) === YamlResourceType::WORKFLOW->value;
+            })
+            ->each(function (string $file) use ($disk, $pathWorkflowsDir) {
+                $destination = $pathWorkflowsDir.DIRECTORY_SEPARATOR.basename($file);
 
-        $pathWorkflowDown = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_DOWN->value;
+                if (\Illuminate\Support\Facades\File::isFile($destination)) {
+                    return;
+                }
 
-        if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowDown)) {
-            $workflowDown = new WorkflowData(
-                require_status: WorkspaceStatus::READY,
-                ending_status: WorkspaceStatus::SUSPENDED,
-                sort_order: 100,
-                steps: collect(),
-            );
-
-            \Illuminate\Support\Facades\File::put($pathWorkflowDown, Yaml::dump($workflowDown->toArray(), inline: 10));
-        }
+                \Illuminate\Support\Facades\File::put($destination, $disk->get($file));
+            });
     }
 
     /**
