@@ -18,33 +18,52 @@ composer logs:wipe    # truncate that log
 
 `native:build` prebuild chain (see `config/nativephp.php`): `npm run build` → `php artisan app:patch-mac-entitlements` → `php artisan optimize`.
 
+CI (`.github/workflows/test.yaml`) runs `composer test` and `vendor/bin/pint --test` on push/PR to `main` (PHP 8.4, Node 22).
+
 ## Architecture
 
-LaborForest is a **NativePHP v2 (Electron) macOS desktop app** — a GUI for managing git worktrees ("workspaces") of local repositories ("projects") and running user-authored YAML workflows inside them. The UI is a single Filament v5 panel (`app/Providers/Filament/AppPanelProvider.php`, path `''`). There are no web routes and no Filament Resources — only Pages (`Project`, `ProjectWorkflows`, `WorkflowLog`, `Settings` in `app/Filament/Pages/`) and Widgets. Project nav items are generated dynamically from projects.yaml at panel boot.
+LaborForest is a **NativePHP v2 (Electron) macOS desktop app** — a GUI for managing git worktrees ("workspaces") of local repositories ("projects") and running user-authored YAML workflows inside them. The UI is a single Filament v5 panel (`app/Providers/Filament/AppPanelProvider.php`, path `''`). There are no web routes and no Filament Resources — only Pages (`Dashboard`, `Project`, `ProjectWorkflows`, `WorkflowLog`, `Settings` in `app/Filament/Pages/`) and Widgets. Project nav items are generated dynamically from projects.yaml at panel boot.
 
 ### State lives in YAML files, not the database
 
-- Global: `~/.laborforest/settings.yaml` and `~/.laborforest/projects.yaml`, accessed via the `user_home` disk (`app/Enums/Disk.php`). That disk is registered at runtime by NativePHP — it does not exist outside the native runtime and is not in `config/filesystems.php`.
-- Per-workspace: a `.laborforest/` directory inside each worktree holding `workflows/*.yaml`, `logs/*.yaml`, and `status.yaml` (paths defined by enums `Directory` and `File`).
+- Global: `~/.laborforest/settings.yaml`, `~/.laborforest/projects.yaml`, and the transient `pending.yaml`, accessed via the `user_home` disk. Read-only app assets (`extras/bin/lf`, `extras/example-workflows/`) come from the `extras` disk. Both cases live in `app/Enums/Disk.php`; **both disks are registered at runtime by NativePHP** — they do not exist outside the native runtime and are not in `config/filesystems.php`.
+- Per-workspace: a `.laborforest/` directory inside each worktree holding `workflows/*.yaml` plus an `ignored/` subdirectory (git-ignored) holding `logs/*.yaml` and `status.yaml` (paths defined by enums `Directory` and `File`). A project may instead keep the whole `.laborforest` dir out of git via `.git/info/exclude` (`Directory::GIT_INFO` / `File::GIT_EXCLUDE`), in which case workflows are copied into each new worktree from the primary dir.
+- Workflow and run-log YAML files are recognized by their `resource_type` key (`app/Enums/YamlResourceType.php`), not by filename or location.
 - SQLite is used **only as the queue backend** — the sole domain migration is the jobs table. `app/Models/User.php` is an unused stub.
 - Every domain object is a `spatie/laravel-data` class in `app/Data/` with `rules()` that validate user-authored YAML (`ProjectData`, `WorkspaceData`, `WorkflowData`, `WorkflowRunLogData`, …). Some override `transform()` to keep generated YAML clean.
 - Shared file helpers: `app/Concerns/Services/ManagesFiles.php`.
 
 ### Workflow execution flow
 
-Filament page action → `WorkflowService::dispatchWorkflow()` → `RunWorkflow` job on the database queue → sets workspace status to WORKING, writes a run log with a pending entry per step, then iterates steps. Step types (`app/Enums/WorkflowStepType.php`):
+Filament page action (or the `lf` CLI, below) → `WorkflowService::dispatchWorkflow()` → `RunWorkflow` job on the database queue → sets workspace status to WORKING, writes a run log with a pending entry per step, then iterates steps. Step types (`app/Enums/WorkflowStepType.php`):
 
 - `shell` — Laravel's Process facade in the workspace cwd, wrapped in `set -eu; set -o pipefail` so mid-chain failures surface
 - `update_env` — rewrites keys in the workspace's `.env`
 - `workflow` — runs a child workflow inline (parent fails with it; cycles guarded via `ancestorWorkflowNames`)
 
-Steps support `if`/`unless` shell gates and per-step `env`. Progress is pushed to the UI by broadcasting on the NativePHP channel (`app/Enums/BroadcastChannel.php`): `WorkflowStarted`, `WorkflowStepStarted/Finished/Skipped`, `WorkflowStepOutputUpdated` (throttled to 1/sec with a final flush), `WorkflowFinished`. Final status = `ERROR` on failure, else the workflow's `ending_status`.
+A workflow file declares `require_status`, `ending_status`, `sort_order` and its `steps` (`app/Data/WorkflowData.php`). Whether it may run is decided in one place — `WorkspaceStatus::allowsWorkflowRequiring()` — and enforced in `WorkflowService::ensureWorkspaceCanRunWorkflow()` (throws `WorkflowNotRunnable`) rather than only by disabling the UI button, so a CLI-dispatched run cannot bypass it. Child `workflow` steps are deliberately exempt from the gate.
+
+Steps support `if`/`unless` shell gates and per-step `env`. Progress is pushed to the UI by broadcasting on the NativePHP channel (`app/Enums/BroadcastChannel.php`): `WorkflowStarted`, `WorkflowStepStarted/Finished/Skipped`, `WorkflowStepOutputUpdated` (throttled to 1/sec with a final flush), `WorkflowFinished`, plus `ProjectDataUpdated` for workspace-list refreshes. Final status = `ERROR` on failure, else the workflow's `ending_status`.
+
+### CLI tools (`lf`) and deep links
+
+`extras/bin/lf` is a bash script the user symlinks onto their PATH from `AddCliToolsWidget` (falling back to `osascript … with administrator privileges` when the plain `ln -sf` is denied; dismissal persists as `SettingsData::$cli_tools_dismissed`). It supports `lf add-project` and `lf run <workflow>`.
+
+The script does not talk to the app over HTTP. It writes the request to `~/.laborforest/pending.yaml` (`command`, `path` = `$PWD`, optional `workflow`) and then fires `open laborforest://…` — **the deeplink is only a wake/focus trigger**; the request travels through the file. The scheme comes from `deeplink_scheme` in `config/nativephp.php`; there is no route handler (`routes/web.php` is empty).
+
+Both drain paths call `CliToolsService::runPendingCommand()`, which returns the URL to land on and never throws — failures come back as `Dashboard::getUrl(['error' => …])`, and `Dashboard` reads that off the query string because these callers share no session with the window:
+
+- **warm** — `app/Listeners/RunPendingCliCommand.php` on `Native\Desktop\Events\App\OpenedFromURL`. Registered by event auto-discovery *only*; adding a manual `Event::listen` makes it fire twice (`RunPendingCliCommandTest` asserts a single binding). It navigates by window id (`WindowId::MAIN`) via `Window::all()`, because `Window::current()` asks Electron for the *focused* window and dies on `null.id`.
+- **cold** — `NativeAppServiceProvider::boot()` drains the file *before* `Window::open()`. macOS fires open-url before the PHP server is listening and NativePHP's `notifyLaravel()` swallows the failure, so the event never arrives on a cold launch.
+
+`pullPendingCommand()` deletes `pending.yaml` before parsing it, so a malformed file cannot wedge every future launch and a deeplink arriving after the boot drain finds nothing left to run.
 
 ### Services (`app/Services/`)
 
 - `GitService` — worktree/branch/status operations via the git CLI
-- `ProjectsService` — projects.yaml CRUD, workspace lifecycle, seeds starter up/down workflows, initializes `.laborforest/`
-- `WorkflowService` — loads/validates workflow YAML, builds run logs, dispatches jobs
+- `ProjectsService` — projects.yaml CRUD, workspace lifecycle, initializes `.laborforest/`, and seeds a user-chosen starter workflow set from `extras/example-workflows/{bare,javascript,laravel}` (`listExampleWorkflowPaths()` / `initializeWorkspaceStarterWorkflows()`)
+- `WorkflowService` — loads/validates workflow YAML, builds run logs, gates and dispatches jobs
+- `CliToolsService` — installs `lf`, drains and executes `pending.yaml` (see CLI tools above)
 - `VariableReplacementService` — resolves `{{ }}` placeholders (`app/Enums/Variable.php`), including dynamic `ENV_*` read from the workspace's own `.env`
 - `ProcessEnvironmentService::sanitized()` — strips LaborForest's own env from spawned processes (`app/Enums/HostEnvKey.php`) so workspace commands don't inherit this app's `.env`
 - `LaunchService` — opens the configured IDE/browser/terminal for a workspace
@@ -55,10 +74,20 @@ Each service throws typed exceptions from `app/Exceptions/` (`GitStatusNotClean`
 ### Gotchas
 
 - `AppServiceProvider::hardenNativeDatabaseConnection()` re-applies WAL/busy_timeout/IMMEDIATE to the `nativephp` sqlite connection because NativePHP rewrites it at boot; removing this brings back non-retryable "database is locked" errors in queue pop.
-- `vendor/nativephp/desktop/resources/build/app/` contains a stale copy of this entire application — vendor grep hits may be misleading duplicates of `app/` files.
+- `vendor/nativephp/desktop/resources/build/app/` and `nativephp/electron/dist/mac-arm64/LaborForest.app/Contents/Resources/build/app/` each contain a stale copy of this entire application (including `.claude/skills` and `.junie/skills`) — grep hits there are misleading duplicates of the real files.
+- laravel-data structure caching is disabled in `config/data.php`. `php artisan optimize` (native:build prebuild) runs `data:cache-structures`, and the native runtime rebinds `storage_path()` to `~/Library/Application Support/laborforest-dev/storage` — terminal `optimize:clear` writes to the project storage and never reaches that copy, so a cached structure silently drops properties added to `app/Data/` classes.
 - Frontend is minimal: `resources/js/app.js` is empty; all UI is server-rendered Filament/Livewire. Tailwind v4 is CSS-first (no tailwind.config.js) — theme config in `resources/css/app.css` and `resources/css/filament/app/theme.css`, which safelists dynamically-built status color classes via `@source inline(...)`.
-- Livewire components `WorkflowLogStep` (ANSI→HTML step output) and `WorkflowNotifications` (listens for `native:App\Events\WorkflowFinished`) are injected globally via Filament render hooks in `AppServiceProvider`.
-- Tests: Pest 5 with sqlite `:memory:` and sync queue; currently only stub ExampleTests exist.
+- `AppServiceProvider` registers two Filament render hooks: `TOPBAR_END` → `filament/global/refresh.blade.php` (reload button) and `BODY_END` → `WorkflowNotifications` (listens for `native:App\Events\WorkflowFinished`). The other Livewire component, `WorkflowLogStep` (ANSI→HTML step output), is *not* global — it is rendered inline in `resources/views/filament/pages/workflow-log.blade.php`.
+- `AGENTS.md` is a byte-identical copy of this file (Boost writes guidelines for both `claude_code` and `junie`, see `boost.json`). Edit both, or they drift.
+
+### Testing
+
+Pest 5, sqlite `:memory:`, sync queue; feature tests in `tests/Feature/`, `tests/Unit/` is empty. Read the project skills in `.claude/skills/` — `service-testing`, `livewire-testing`, `pest-testing` — before writing tests; they document the patterns in detail. The load-bearing conventions:
+
+- `tests/Pest.php` runs `Process::fake([])->preventStrayProcesses()` before every feature test, so any process a test forgot to fake fails loudly instead of reaching a real shell. Neither call works alone. A test's own `Process::fake()` merges on top.
+- `RefreshDatabase` is intentionally commented out — nothing domain-level lives in the database.
+- Test doubles live in `tests/Fakes/` (`ProcessSpy`, `FakeProcessEnvironmentService`, `FakeRunPendingCliCommand`); YAML fixtures in `tests/Fixtures/`. Shared Filament/Livewire fixture builders sit in `tests/Pest.php` prefixed `component*`, because top-level test functions share one global namespace across the suite.
+- Deliberate seams are `protected` methods: `LaunchService::launchProcess()` (its `create_new_console` + faked `PendingProcess::start()` combination is fatal) and `RunPendingCliCommand::navigateTo()` (no Electron in tests). `GitService::runGit()` is private and is *not* a seam — fake the Process facade instead.
 
 <laravel-boost-guidelines>
 === foundation rules ===
