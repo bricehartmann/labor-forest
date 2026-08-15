@@ -367,7 +367,10 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     {
         return rescue(fn () => app(ProjectsService::class)
             ->listExampleWorkflowPaths()
-            ->mapWithKeys(fn (string $path) => [$path => ucwords(basename($path))])
+            ->mapWithKeys(fn (string $path) => [$path => match(true) {
+                basename($path) === 'javascript' => 'JavaScript',
+                default => ucwords(basename($path)),
+            }])
             ->all(), []);
     }
 
