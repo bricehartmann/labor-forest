@@ -4,7 +4,8 @@ namespace App\Services;
 
 use App\Data\ProjectData;
 use App\Data\WorkspaceData;
-use Symfony\Component\Process\Process;
+use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Process;
 
 class LaunchService
 {
@@ -41,28 +42,32 @@ class LaunchService
             return;
         }
 
-        $process = $this->launchProcess(
+        $this->launchProcess(
             command: app(VariableReplacementService::class)->replace(
                 projectData: $projectData,
                 workspaceData: $workspaceData,
                 content: $command,
             ),
             cwd: $workspaceData->path,
-        );
-        $process->setOptions(['create_new_console' => true]);
-        $process->start();
+        )->start();
     }
 
     /**
-     * Build the launch process, isolated as a test seam mirroring GitService::gitProcess().
+     * Build the launch process, kept as a test seam even though the rest of the application doubles
+     * processes with Process::fake().
+     *
+     * The fake path of PendingProcess::start() builds a process it never starts and then discards
+     * it, and create_new_console sends that process's destructor down a branch that reads pipes
+     * which were never opened — a fatal error rather than a failed test. The option cannot simply
+     * be dropped: without it the destructor stops the process instead, killing the editor or
+     * terminal the moment this method returns.
      */
-    protected function launchProcess(string $command, string $cwd): Process
+    protected function launchProcess(string $command, string $cwd): PendingProcess
     {
-        return Process::fromShellCommandline(
-            command: $command,
-            cwd: $cwd,
+        return Process::path($cwd)
             // a terminal or editor opened here must not inherit this application's environment
-            env: app(ProcessEnvironmentService::class)->sanitized(),
-        );
+            ->env(app(ProcessEnvironmentService::class)->sanitized())
+            ->options(['create_new_console' => true])
+            ->command($command);
     }
 }

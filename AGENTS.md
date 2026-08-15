@@ -34,7 +34,7 @@ LaborForest is a **NativePHP v2 (Electron) macOS desktop app** — a GUI for man
 
 Filament page action → `WorkflowService::dispatchWorkflow()` → `RunWorkflow` job on the database queue → sets workspace status to WORKING, writes a run log with a pending entry per step, then iterates steps. Step types (`app/Enums/WorkflowStepType.php`):
 
-- `shell` — Symfony Process in the workspace cwd, wrapped in `set -eu; set -o pipefail` so mid-chain failures surface
+- `shell` — Laravel's Process facade in the workspace cwd, wrapped in `set -eu; set -o pipefail` so mid-chain failures surface
 - `update_env` — rewrites keys in the workspace's `.env`
 - `workflow` — runs a child workflow inline (parent fails with it; cycles guarded via `ancestorWorkflowNames`)
 

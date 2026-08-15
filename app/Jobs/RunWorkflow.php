@@ -11,6 +11,7 @@ use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\File as FileName;
 use App\Enums\FileExtension;
+use App\Enums\ProcessOutputType;
 use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
@@ -26,12 +27,14 @@ use App\Services\ProcessEnvironmentService;
 use App\Services\ProjectsService;
 use App\Services\VariableReplacementService;
 use App\Services\WorkflowService;
+use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
-use Symfony\Component\Process\Process;
 use Throwable;
 
 class RunWorkflow implements ShouldQueue
@@ -234,20 +237,20 @@ class RunWorkflow implements ShouldQueue
                     'env' => $stepEnv,
                 ]);
 
-                $ifProcess = $this->evaluateGate($if, $workspaceData->path, $env);
+                $ifResult = $this->evaluateGate($if, $workspaceData->path, $env);
 
-                if (! $ifProcess->isSuccessful()) {
+                if (! $ifResult->successful()) {
                     $skipReason = WorkflowStepSkipReason::IF_FAILED;
 
                     Log::info('workflow: step if failed', [
                         ...$stepContext,
-                        'exit_code' => $ifProcess->getExitCode(),
-                        'error' => $ifProcess->getErrorOutput(),
+                        'exit_code' => $ifResult->exitCode(),
+                        'error' => $ifResult->errorOutput(),
                     ]);
                 } else {
                     Log::info('workflow: step if passed', [
                         ...$stepContext,
-                        'exit_code' => $ifProcess->getExitCode(),
+                        'exit_code' => $ifResult->exitCode(),
                     ]);
                 }
             }
@@ -265,20 +268,20 @@ class RunWorkflow implements ShouldQueue
                     'env' => $stepEnv,
                 ]);
 
-                $unlessProcess = $this->evaluateGate($unless, $workspaceData->path, $env);
+                $unlessResult = $this->evaluateGate($unless, $workspaceData->path, $env);
 
-                if ($unlessProcess->isSuccessful()) {
+                if ($unlessResult->successful()) {
                     $skipReason = WorkflowStepSkipReason::UNLESS_MATCHED;
 
                     Log::info('workflow: step unless matched', [
                         ...$stepContext,
-                        'exit_code' => $unlessProcess->getExitCode(),
+                        'exit_code' => $unlessResult->exitCode(),
                     ]);
                 } else {
                     Log::info('workflow: step unless did not match', [
                         ...$stepContext,
-                        'exit_code' => $unlessProcess->getExitCode(),
-                        'error' => $unlessProcess->getErrorOutput(),
+                        'exit_code' => $unlessResult->exitCode(),
+                        'error' => $unlessResult->errorOutput(),
                     ]);
                 }
             }
@@ -329,14 +332,8 @@ class RunWorkflow implements ShouldQueue
                     'command' => $command,
                 ]);
 
-                $runProcess = Process::fromShellCommandline(
-                    command: $this->strictShellCommand($command),
-                    cwd: $workspaceData->path,
-                    env: $env,
-                );
-                $runProcess->setTimeout($this->timeout ?: null);
-                $runProcess->run(function ($type, $buffer) use (&$output, &$lastOutputBroadcastAt, $logStep, $projectData, $workspaceData, $stepHash): void {
-                    if ($type === Process::ERR) {
+                $runResult = $this->pendingProcess($workspaceData->path, $env)->start($this->strictShellCommand($command), function (string $type, string $buffer) use (&$output, &$lastOutputBroadcastAt, $logStep, $projectData, $workspaceData, $stepHash): void {
+                    if ($type === ProcessOutputType::STDERR->value) {
                         $output .= 'STDERR: '.$buffer;
                     } else {
                         $output .= $buffer;
@@ -360,7 +357,7 @@ class RunWorkflow implements ShouldQueue
                         stepHash: $stepHash,
                         output: $output,
                     ));
-                });
+                })->wait();
 
                 // the throttle above can swallow the final chunks, so always broadcast the whole buffer
                 broadcast(new WorkflowStepOutputUpdated(
@@ -373,22 +370,22 @@ class RunWorkflow implements ShouldQueue
 
                 Log::info('workflow: shell step completed', [
                     ...$stepContext,
-                    'exit_code' => $runProcess->getExitCode(),
+                    'exit_code' => $runResult->exitCode(),
                     'output_length' => strlen($output),
                     'output_preview' => Str::limit($output, 200),
                 ]);
 
-                $logStep->exitCode = $runProcess->getExitCode();
+                $logStep->exitCode = $runResult->exitCode();
                 $logStep->output = $output;
                 $logStep->ended_timestamp = now()->timestamp;
                 $this->flushRunLog();
 
-                if (! $runProcess->isSuccessful()) {
+                if (! $runResult->successful()) {
                     $allSuccessful = false;
 
                     Log::info('workflow: shell step failed, aborting workflow', [
                         ...$stepContext,
-                        'exit_code' => $runProcess->getExitCode(),
+                        'exit_code' => $runResult->exitCode(),
                     ]);
 
                     // no need to broadcast WorkflowStepFinished because it will be picked up on data refresh from WorkflowFinished event
@@ -610,21 +607,32 @@ class RunWorkflow implements ShouldQueue
     }
 
     /**
-     * Run a step's if or unless command and return the finished process for exit code inspection.
+     * Build a pending process for a step, carrying the job's timeout where zero means none.
      *
      * @param  array<string, string|false>  $env  already sanitized by ProcessEnvironmentService
      */
-    protected function evaluateGate(string $command, string $cwd, array $env): Process
+    protected function pendingProcess(string $cwd, array $env): PendingProcess
     {
-        $process = Process::fromShellCommandline(
-            command: $command,
-            cwd: $cwd,
-            env: $env,
-        );
-        $process->setTimeout($this->timeout ?: null);
-        $process->run();
+        return Process::path($cwd)
+            ->env($env)
+            ->when(
+                $this->timeout > 0,
+                fn (PendingProcess $pending): PendingProcess => $pending->timeout($this->timeout),
+                fn (PendingProcess $pending): PendingProcess => $pending->forever(),
+            );
+    }
 
-        return $process;
+    /**
+     * Run a step's if or unless command and return the finished result for exit code inspection.
+     *
+     * The command is deliberately not wrapped by strictShellCommand(): a gate's raw exit code is
+     * the signal, so a non-zero status is an answer rather than a failure.
+     *
+     * @param  array<string, string|false>  $env  already sanitized by ProcessEnvironmentService
+     */
+    protected function evaluateGate(string $command, string $cwd, array $env): ProcessResult
+    {
+        return $this->pendingProcess($cwd, $env)->run($command);
     }
 
     /**

@@ -12,6 +12,7 @@ use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Process;
 use Tests\TestCase;
 
 /*
@@ -27,6 +28,13 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
  // ->use(RefreshDatabase::class)
+    ->beforeEach(function () {
+        // Turns recording on while registering no handlers, so any process a test forgot to fake
+        // fails loudly instead of reaching a shell. Neither call works alone: preventStrayProcesses()
+        // does nothing until something is recording, and a bare Process::fake() installs a catch-all
+        // handler that would swallow everything. A test's own Process::fake() merges on top of this.
+        Process::fake([])->preventStrayProcesses();
+    })
     ->in('Feature');
 
 /*

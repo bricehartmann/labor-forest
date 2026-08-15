@@ -1,6 +1,6 @@
 ---
 name: service-testing
-description: "Use this skill whenever writing, editing, fixing, or reviewing a Pest feature test for a class in app/Services/ — GitService, ProjectsService, WorkflowService, SettingsService, LaunchService, VariableReplacementService, ProcessEnvironmentService. Trigger on any request to test a service, cover a service method, add failure cases for a service, fake or mock the git calls, avoid spawning shell commands in tests, fake the user_home disk, or stub the filesystem for a service. Also trigger when a service test fails with 'Disk [user_home] does not have a configured driver', when a test appears to spawn a real git process, or when deciding where a test double should live. Covers: the fake-subclass doubling pattern, protected process seams, container-bound collaborators, Storage::fake('user_home'), File facade stubbing, success plus failure coverage, and the no-preexisting-state rule. Do not use for Filament pages, Livewire components, jobs, or app/Data/ DTOs."
+description: "Use this skill whenever writing, editing, fixing, or reviewing a Pest feature test for a class in app/Services/ — GitService, ProjectsService, WorkflowService, SettingsService, LaunchService, VariableReplacementService, ProcessEnvironmentService. Trigger on any request to test a service, cover a service method, add failure cases for a service, fake or mock the git calls, avoid spawning shell commands in tests, fake the user_home disk, or stub the filesystem for a service. Also trigger when a service test fails with 'Disk [user_home] does not have a configured driver', with 'Attempted process [...] without a matching fake', with a BadMethodCallException from File::isFile during a spawned process, or when deciding where a test double should live. Covers: the ProcessSpy doubling pattern over Process::fake(), the one surviving LaunchService seam, container-bound collaborators, Storage::fake('user_home'), File facade stubbing, success plus failure coverage, and the no-preexisting-state rule. Do not use for Filament pages, Livewire components, jobs, or app/Data/ DTOs."
 license: MIT
 metadata:
   author: labor-forest
@@ -20,9 +20,11 @@ writing a new service test.
 
 ## Non-Negotiables
 
-**1. No real subprocess.** A test must never spawn `git` or a launch command. Services build
-`Symfony\Component\Process\Process` directly, so Laravel's `Process::fake()` does not intercept them —
-double at the protected seam instead (see [Adding a Seam](#adding-a-seam-when-one-is-missing)).
+**1. No real subprocess.** A test must never spawn `git` or a launch command. Every service now runs
+processes through `Illuminate\Support\Facades\Process`, so `Process::fake()` intercepts them — double
+there, via [`ProcessSpy`](#the-processspy-pattern). `tests/Pest.php` installs
+`Process::fake([])->preventStrayProcesses()` for every Feature test, so a process you forgot to fake
+fails with `Attempted process [...] without a matching fake.` rather than reaching a shell.
 
 **2. No real filesystem.** No temp directories, no `sys_get_temp_dir()`, no writing under the repo. Use
 fixed absolute paths as *strings only* (`/tmp/repo`, `/tmp/repo-feature`) and double the filesystem.
@@ -44,112 +46,106 @@ fixed absolute paths as *strings only* (`/tmp/repo`, `/tmp/repo-feature`) and do
 Tests live in `tests/Feature/<Service>Test.php`. `tests/Pest.php` binds `TestCase` to `Feature` only — a
 test in `tests/Unit` has no application container and cannot resolve or bind anything.
 
-## The Fake-Subclass Pattern
+## The ProcessSpy Pattern
 
-The house pattern for a service that shells out: subclass it, override **only** the protected seam, and
-let every line of production logic run.
+Instantiate the **real** service and fake the processes underneath it with
+`Tests\Fakes\ProcessSpy::install()`.
 
-<!-- Fake subclass with spy and stub queue -->
+<!-- Installing the spy -->
 ```php
-/**
- * A GitService whose process construction is replaced by a queue of canned results, so no git
- * binary is ever spawned and the exact command and working directory can be asserted.
- */
-final class FakeGitService extends GitService
-{
-    /**
-     * Every command handed to gitProcess(), as a [command, cwd] pair.
-     *
-     * @var array<int, array{0: string, 1: string}>
-     */
-    public array $commands = [];
+beforeEach(function () {
+    $this->git = new GitService;
+    $this->process = ProcessSpy::install();
+    $this->instance(ProcessEnvironmentService::class, new FakeProcessEnvironmentService);
 
-    /**
-     * The results each successive gitProcess() call reports, consumed first in first out.
-     *
-     * @var array<int, array{ok: bool, out?: string, err?: string}>
-     */
-    public array $responses = [];
-
-    protected function gitProcess(string $command, string $cwd): Process
-    {
-        $this->commands[] = [$command, $cwd];
-
-        $response = array_shift($this->responses) ?? ['ok' => true];
-
-        $process = Mockery::mock(Process::class);
-        $process->allows('run')->andReturns(0);
-        $process->allows('isSuccessful')->andReturns($response['ok']);
-        $process->allows('getOutput')->andReturns($response['out'] ?? '');
-        $process->allows('getErrorOutput')->andReturns($response['err'] ?? '');
-
-        return $process;
-    }
-}
+    $this->repo = '/tmp/repo';
+    $this->worktree = '/tmp/repo-feature';
+});
 ```
 
-Four properties make this work:
+`ProcessSpy` registers one catch-all handler closure with `Process::fake()`. Three properties make it
+work:
 
-- `$commands` is the **spy**. Interaction assertions read from it, not from Mockery expectations.
-- `$responses` is the **stub queue**, consumed FIFO.
-- `?? ['ok' => true]` is deliberate — happy-path tests set no responses at all. See the `removeWorktree`,
-  `commitAll`, and `doesBranchExist` describes in `GitServiceTest`.
-- Mockery appears only for the leaf `Process`, and only via `allows()` — stubs, never expectations.
+- `$commands` is the **spy** — `[command, cwd]` pairs in call order.
+- `$responses` is the **stub queue**, consumed FIFO, shaped `['ok' => bool, 'out' => ?string, 'err' => ?string]`.
+- `$pending` holds each `PendingProcess`, for asserting `environment`, `timeout` or `options`.
 
-Docblock the class and both properties with array shapes.
+An exhausted queue reports success with no output, so happy-path tests set no responses at all. See
+the `removeWorktree`, `commitAll`, and `doesBranchExist` describes in `GitServiceTest`.
+
+### Why a closure handler rather than plain `Process::fake()`
+
+`Process::fake(['git status *' => ...])` plus `Process::assertRan()` cannot express what these suites
+assert, for three reasons rooted in the framework:
+
+- `Factory::$recorded` is protected with no getter, and an `assertRan()` closure sees one process at a
+  time with no index — so **order** is unassertable, as is "these commands and nothing else".
+- Matching is on the command line only, so two runs of the *same* command in **different directories**
+  (`git status --porcelain` in the repo and then in a worktree) cannot be told apart or given different
+  output.
+- First registered pattern wins, not most specific.
+
+The handler closure is passed the `PendingProcess` it is answering for, which recovers all of it.
+
+### Stub the environment service too
+
+With the process seams gone, `ProcessEnvironmentService::sanitized()` runs for real on every spawned
+process — scanning `getenv()` and parsing this application's own `.env`. That reaches whatever `File`
+facade mock the test installed, and a full Mockery mock throws on the unstubbed `isFile()`. Bind
+`Tests\Fakes\FakeProcessEnvironmentService`, which answers with a sentinel;
+`ProcessEnvironmentServiceTest` covers the real behaviour.
 
 ### Where a Fake Lives
 
-Keep the fake at the bottom of its own test file until a second file needs it, then extract it to
-`tests/Fakes/FakeGitService.php` under namespace `Tests\Fakes`. `"Tests\\": "tests/"` is already in
-`composer.json` `autoload-dev`, so no composer change is needed.
+Keep a fake at the bottom of its own test file until a second file needs it, then extract it to
+`tests/Fakes/` under namespace `Tests\Fakes`. `"Tests\\": "tests/"` is already in `composer.json`
+`autoload-dev`, so no composer change is needed.
 
-Writing `ProjectsServiceTest` will need `FakeGitService` and therefore triggers that extraction.
+## The One Surviving Seam: LaunchService
 
-## Adding a Seam When One Is Missing
+`LaunchService::launchProcess()` is the single exception to "double with `Process::fake()`", and it is
+not a matter of taste. `LaunchService` calls `start()`, and it must set
+`options(['create_new_console' => true])` — without that option Symfony's `Process::__destruct()` stops
+the process as `launch()` returns, killing the editor or terminal that was just opened.
 
-`GitService::gitProcess()` exists precisely so process construction can be overridden. `LaunchService`
-has no equivalent — it builds `Process::fromShellCommandline(...)` inline inside `protected launch()`,
-which is also the method under test, so overriding it would delete the logic being tested.
+But `PendingProcess::start()` builds a Symfony process *before* it checks for a fake, then discards it
+unstarted. With `create_new_console` set, that discarded process's destructor reads pipes which were
+never opened:
 
-**Before testing a service that constructs a `Process` inline, extract a protected factory method
-mirroring `GitService::gitProcess()`.** For `LaunchService` that is:
-
-<!-- The seam to add before testing LaunchService -->
-```php
-protected function launchProcess(string $command, string $cwd): Process
-{
-    return Process::fromShellCommandline(
-        command: $command,
-        cwd: $cwd,
-        env: app(ProcessEnvironmentService::class)->sanitized(),
-    );
-}
+```
+Error: Typed property Symfony\Component\Process\Process::$processPipes
+must not be accessed before initialization
 ```
 
-This is the only production change this skill ever asks for. It keeps the doubling strategy uniform
-across `app/Services/`.
+That is a fatal, not a failing assertion — so `LaunchService` and `Process::fake()` cannot meet. Keep
+`launchProcess()` as a protected seam, override it in `FakeLaunchService`, and inspect the real one
+through `ExposedLaunchService` (both at the bottom of `LaunchServiceTest`).
+
+**Do not add a seam anywhere else.** For every other service, fake the process.
 
 ## Doubling Collaborators
 
 No service has a constructor — collaborators are pulled inline with `app(GitService::class)`, and nothing
 is registered as a singleton (`AppServiceProvider::register()` is empty), so the container builds a fresh
-instance per resolve. Substitute by binding the fake subclass:
+instance per resolve.
 
-<!-- Binding a fake collaborator into the container -->
+A collaborator that only shells out needs no double at all: let the real one run and fake the process
+beneath it. `ProjectsServiceTest` does exactly this — it binds no `GitService`.
+
+<!-- Faking a collaborator's processes rather than the collaborator -->
 ```php
 beforeEach(function () {
-    $this->git = new FakeGitService;
-    $this->instance(GitService::class, $this->git);
+    $this->process = ProcessSpy::install();
+    $this->instance(ProcessEnvironmentService::class, new FakeProcessEnvironmentService);
 });
 
 it('lists the workspaces of a project', function () {
-    $this->git->responses = [['ok' => true, 'out' => "worktree /tmp/repo\nHEAD aaa111\nbranch refs/heads/main\n"]];
+    $this->process->responses = [['ok' => true, 'out' => "worktree /tmp/repo\nHEAD aaa111\nbranch refs/heads/main\n"]];
 
     $workspaces = app(ProjectsService::class)->loadProjectWorkspaces('/tmp/repo');
 
     expect($workspaces)->toHaveCount(1)
-        ->and($this->git->commands)->toBe([
+        ->and($this->process->commands)->toBe([
             ['git worktree list --porcelain', '/tmp/repo'],
         ]);
 });
@@ -162,16 +158,16 @@ sequence spying comes free.
 > at **boot** time, wrapped in `rescue()`. Anything bound inside a test body is too late to affect panel
 > navigation. Irrelevant to service tests; fatal to anyone who assumes otherwise.
 
-## Per-Service Seams
+## Per-Service Doubles
 
-| Service | Seams to double | Failure cases to cover |
+| Service | What to double | Failure cases to cover |
 |---------|-----------------|------------------------|
-| `GitService` | `gitProcess()` via `FakeGitService`; `File::shouldReceive('exists')` | `GitOperationFailed` for each operation label; `WorkspaceDirectoryExists`; `GitBranchDoesNotExist`; the bare `RuntimeException` when neither the branch exists nor a base branch is given |
+| `GitService` | `ProcessSpy::install()`; `FakeProcessEnvironmentService`; `File::shouldReceive('exists')` | `GitOperationFailed` for each operation label; `WorkspaceDirectoryExists`; `GitBranchDoesNotExist`; the bare `RuntimeException` when neither the branch exists nor a base branch is given |
 | `SettingsService` | `Storage::fake('user_home')` — no other seam | `InvalidSettingsFile::fromParseError` / `notAMapping` / `fromValidation`. A null or empty file yields defaults via the merge and does **not** throw — test that too |
-| `ProjectsService` | `Storage::fake('user_home')`; bind `FakeGitService`; `File` facade for absolute workspace paths | `InvalidProjectsFile` (including `withProblems`, which accumulates *every* bad entry rather than failing on the first); `ProjectNotFound`; `ProjectDirectoryNotFound` / `ProjectDirectoryExists` / `ProjectDirectoryNotGitRepository`; `GitStatusNotClean`; `WorkspaceNotFound`. Also cover the `rescue()`d paths that swallow git failures and fall back to defaults |
+| `ProjectsService` | `Storage::fake('user_home')`; `ProcessSpy::install()` (the real `GitService` runs); `FakeProcessEnvironmentService`; `File` facade for absolute workspace paths | `InvalidProjectsFile` (including `withProblems`, which accumulates *every* bad entry rather than failing on the first); `ProjectNotFound`; `ProjectDirectoryNotFound` / `ProjectDirectoryExists` / `ProjectDirectoryNotGitRepository`; `GitStatusNotClean`; `WorkspaceNotFound`. Also cover the `rescue()`d paths that swallow git failures and fall back to defaults |
 | `WorkflowService` | `Queue::fake()`; bind a fake `ProjectsService`; `File` facade under `.laborforest/` | `InvalidWorkflowFile` — a missing file also throws, since `Yaml::parseFile` raises `ParseException`; `WorkspaceNotFound` propagating out of `dispatchWorkflow`. Also the non-throwing skips: missing directory returns `collect()`, wrong `resource_type` filtered out, empty-step workflows rejected |
 | `VariableReplacementService` | `File::shouldReceive('isFile')` and `get()` for the workspace `.env` | `UnresolvedVariable::unknownVariable`; `::missingEnvironmentVariable` (thrown from inside the preg callback); `::replacementFailed` |
-| `LaunchService` | the `launchProcess()` seam above; bind a fake `SettingsService` | Silent early return on a null or empty command; `InvalidSettingsFile` and `UnresolvedVariable` propagating through |
+| `LaunchService` | the `launchProcess()` seam above; `FakeProcessEnvironmentService`; bind a fake `SettingsService` | Silent early return on a null or empty command; `InvalidSettingsFile` and `UnresolvedVariable` propagating through |
 | `ProcessEnvironmentService` | `File::shouldReceive` for `base_path('.env')` | No typed exceptions. Assert presence and absence of **specific keys** — never whole-array equality, because `getenv()` reads the real host environment and cannot be doubled |
 
 Two cross-cutting notes:
@@ -238,7 +234,14 @@ it('throws before running git when the workspace directory already exists', func
 
 ## Common Pitfalls
 
-- Reaching for `Process::fake()` — it does not intercept `Symfony\Component\Process\Process`
+- Reaching for a protected process seam — `Process::fake()` is the doubling mechanism now, and
+  `LaunchService::launchProcess()` is the sole exception
+- Letting the real `ProcessEnvironmentService` run: it parses this application's `.env` on every
+  spawned process and collides with a `File` facade mock. Bind `FakeProcessEnvironmentService`
+- Expecting a faked `run($command, $closure)` to invoke the closure — it does not. Only
+  `start($command, $closure)->wait()` streams under a fake, which is why `RunWorkflow` uses it
+- Forgetting that `Process::result(output: '0')` yields `''` — `normalizeOutput()` short-circuits on
+  `empty()`, and `empty('0')` is true
 - Forgetting `Storage::fake('user_home')` on a `ManagesFiles` service
 - Creating real temp directories instead of using path strings plus a doubled filesystem
 - Uncommenting `RefreshDatabase` in `tests/Pest.php`, or asserting against the database at all

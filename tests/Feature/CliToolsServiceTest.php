@@ -2,9 +2,11 @@
 
 use App\Data\ProjectData;
 use App\Data\SettingsData;
+use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidSettingsFile;
 use App\Exceptions\InvalidWorkflowFile;
 use App\Exceptions\ProjectDirectoryNotGitRepository;
+use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\Project;
@@ -231,6 +233,25 @@ describe('run-workflow', function () {
 
         expect(cliToolsRun())
             ->toBe(cliToolsDashboardUrl("The workflow file [{$this->workflowPath}] is invalid: The steps field is required."));
+    });
+
+    it('reports the failure when the workspace is not in the status the workflow requires', function () {
+        cliToolsWritePendingWorkflow($this->workspacePath, 'up');
+        cliToolsMockProjectsService($this->workspacePath, componentProjectData($this->uuid, '/tmp/repo'));
+
+        $this->mock(SettingsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSettings')->andReturn(new SettingsData);
+        });
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSteps')->andReturn(collect([componentStepData()]));
+            $mock->shouldReceive('dispatchWorkflow')
+                ->once()
+                ->andThrow(new WorkflowNotRunnable('up', WorkspaceStatus::READY, WorkspaceStatus::SUSPENDED));
+        });
+
+        expect(cliToolsRun())
+            ->toBe(cliToolsDashboardUrl('Workflow [up] requires the workspace to be suspended, but it is ready.'));
     });
 
     it('reports the failure when dispatching throws', function () {

@@ -25,8 +25,6 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->hardenNativeDatabaseConnection();
 
-        $this->listenForCliCommands();
-
         FilamentView::registerRenderHook(
             PanelsRenderHook::TOPBAR_END,
             fn (): View => view('filament.global.refresh'),

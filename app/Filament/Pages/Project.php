@@ -184,12 +184,6 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
      */
     protected function isWorkflowActionDisabled(array $record, string $name): bool
     {
-        $status = WorkspaceStatus::from($record['status']);
-
-        if (! $status->ableToRunWorkflow()) {
-            return true;
-        }
-
         $workflow = $this->workflows[$record['path']][$name] ?? null;
 
         if ($workflow === null) {
@@ -198,8 +192,9 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
         $requiredStatus = $workflow['require_status'] ?? null;
 
-        return $requiredStatus !== null
-            && $record['status'] !== $requiredStatus;
+        return ! WorkspaceStatus::from($record['status'])->allowsWorkflowRequiring(
+            $requiredStatus === null ? null : WorkspaceStatus::from($requiredStatus),
+        );
     }
 
     public static function getSlug($panel = null): string
