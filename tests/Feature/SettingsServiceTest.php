@@ -96,6 +96,7 @@ describe('saveSettings', function () {
 
         expect(Yaml::parse($this->disk->get($this->path)))->toBe([
             'dark_mode' => false,
+            'cli_tools_dismissed' => false,
             'workflow_timeout_seconds' => 45,
             'command_launch_ide' => null,
             'command_launch_browser' => null,

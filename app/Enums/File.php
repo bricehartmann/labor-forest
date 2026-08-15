@@ -10,4 +10,5 @@ enum File: string
     case GIT_EXCLUDE = 'exclude';
     case ENV = '.env';
     case STATUS = 'status.yaml';
+    case CLI_TOOLS = 'lf';
 }

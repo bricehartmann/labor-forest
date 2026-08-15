@@ -10,4 +10,5 @@ enum Directory: string
     case LOGS = 'logs';
     case EXAMPLE_WORKFLOWS = 'example-workflows';
     case GIT_INFO = 'info';
+    case BIN = 'bin';
 }

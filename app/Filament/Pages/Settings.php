@@ -154,7 +154,14 @@ class Settings extends Page
         $data = $this->form->getState();
 
         static::resultNotificationOperation(
-            callback: fn () => app(SettingsService::class)->saveSettings(SettingsData::from($data)),
+            callback: function () use ($data) {
+                $settingsService = app(SettingsService::class);
+
+                $settingsService->saveSettings(SettingsData::from([
+                    ...$settingsService->loadSettings()->toArray(),
+                    ...$data,
+                ]));
+            },
             successTitle: 'Settings saved',
         );
 

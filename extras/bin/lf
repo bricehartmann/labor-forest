@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+set -e
+
+urlencode() {
+    old_lc_collate=$LC_COLLATE
+    LC_COLLATE=C
+
+    local length="${#1}"
+    for (( i = 0; i < length; i++ )); do
+        local c="${1:$i:1}"
+        case $c in
+            [a-zA-Z0-9.~_-]) printf '%s' "$c" ;;
+            *) printf '%%%02X' "'$c" ;;
+        esac
+    done
+
+    LC_COLLATE=$old_lc_collate
+}
+
+usage() {
+    cat <<'EOF'
+💪🌲 LaborForest CLI tools
+
+Usage:  lf add-project
+        lf run <workflow>
+        lf --help
+EOF
+}
+
+add_project() {
+    local dir
+    dir="$(urlencode "$PWD")"
+
+    echo "Adding current directory as LaborForest project"
+
+    open "laborforest://add-project?path=${dir}"
+}
+
+run_workflow() {
+    local workflow="$1"
+    local dir
+    dir="$(urlencode "$PWD")"
+
+    if [[ -z "$workflow" ]]; then
+        usage
+        exit 0
+    fi
+
+    if [[ ! -f ".laborforest/workflows/${workflow}.yaml" ]]; then
+        printf "File not found: .laborforest/workflows/${workflow}.yaml\n" >&2
+        exit 1
+    fi
+
+    echo "Running workflow: ${workflow}"
+
+    open "laborforest://run-workflow?path=${dir}&workflow=$(urlencode "$workflow")"
+}
+
+case "${1-}" in
+    add-project) add_project ;;
+    run) run_workflow "${2-}" ;;
+    --help|'') usage ;;
+    *) printf 'Unknown command; see `lf --help`\n' >&2; exit 1 ;;
+esac

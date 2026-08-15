@@ -104,7 +104,7 @@ class WorkflowService
      * @throws InvalidWorkflowFile
      * @throws WorkspaceNotFound
      */
-    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parentLogId, int $timeoutSeconds): string
+    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, ?array $stepHashes, ?string $parentLogId, int $timeoutSeconds): string
     {
         $projectService = app(ProjectsService::class);
         $workspaceData = $projectService->loadProjectWorkspace($workspacePath);

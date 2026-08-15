@@ -56,6 +56,7 @@ Each service throws typed exceptions from `app/Exceptions/` (`GitStatusNotClean`
 
 - `AppServiceProvider::hardenNativeDatabaseConnection()` re-applies WAL/busy_timeout/IMMEDIATE to the `nativephp` sqlite connection because NativePHP rewrites it at boot; removing this brings back non-retryable "database is locked" errors in queue pop.
 - `vendor/nativephp/desktop/resources/build/app/` contains a stale copy of this entire application — vendor grep hits may be misleading duplicates of `app/` files.
+- laravel-data structure caching is disabled in `config/data.php`. `php artisan optimize` (native:build prebuild) runs `data:cache-structures`, and the native runtime rebinds `storage_path()` to `~/Library/Application Support/laborforest-dev/storage` — terminal `optimize:clear` writes to the project storage and never reaches that copy, so a cached structure silently drops properties added to `app/Data/` classes.
 - Frontend is minimal: `resources/js/app.js` is empty; all UI is server-rendered Filament/Livewire. Tailwind v4 is CSS-first (no tailwind.config.js) — theme config in `resources/css/app.css` and `resources/css/filament/app/theme.css`, which safelists dynamically-built status color classes via `@source inline(...)`.
 - Livewire components `WorkflowLogStep` (ANSI→HTML step output) and `WorkflowNotifications` (listens for `native:App\Events\WorkflowFinished`) are injected globally via Filament render hooks in `AppServiceProvider`.
 - Tests: Pest 5 with sqlite `:memory:` and sync queue; currently only stub ExampleTests exist.

@@ -168,7 +168,6 @@ class ProjectsService
     public function loadProjectWorkspaces(string $path): Collection
     {
         $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []));
-
         $primaryPath = $worktrees->firstWhere('is_primary', true)?->path;
 
         if ($primaryPath !== null) {
@@ -176,6 +175,14 @@ class ProjectsService
         }
 
         return $worktrees->map(fn (WorktreeData $worktreeData) => $this->makeWorkspaceData($worktreeData));
+    }
+
+    public function loadProjectFromWorkspace(string $path): ?ProjectData
+    {
+        $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []));
+        $primaryPath = $worktrees->firstWhere('is_primary', true)?->path;
+
+        return $this->loadProjects()->firstWhere('path', $primaryPath);
     }
 
     /**
