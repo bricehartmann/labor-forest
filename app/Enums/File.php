@@ -11,4 +11,5 @@ enum File: string
     case ENV = '.env';
     case STATUS = 'status.yaml';
     case CLI_TOOLS = 'lf';
+    case PENDING_CLI_COMMAND = 'pending.yaml';
 }

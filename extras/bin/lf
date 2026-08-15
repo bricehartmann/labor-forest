@@ -2,20 +2,31 @@
 
 set -e
 
-urlencode() {
-    old_lc_collate=$LC_COLLATE
-    LC_COLLATE=C
+BASE_DIR="$HOME/.laborforest"
+PENDING_FILE="$BASE_DIR/pending.yaml"
 
-    local length="${#1}"
-    for (( i = 0; i < length; i++ )); do
-        local c="${1:$i:1}"
-        case $c in
-            [a-zA-Z0-9.~_-]) printf '%s' "$c" ;;
-            *) printf '%%%02X' "'$c" ;;
-        esac
-    done
+# YAML single-quoted scalar; embedded quotes are doubled per the spec.
+yaml_quote() {
+    local quote="'"
 
-    LC_COLLATE=$old_lc_collate
+    printf '%s%s%s' "$quote" "${1//$quote/$quote$quote}" "$quote"
+}
+
+# The deeplink only wakes and focuses the app; this file is the request it reads.
+write_pending() {
+    local command="$1"
+    local workflow="${2-}"
+
+    mkdir -p "$BASE_DIR"
+
+    {
+        printf 'command: %s\n' "$(yaml_quote "$command")"
+        printf 'path: %s\n' "$(yaml_quote "$PWD")"
+
+        if [[ -n "$workflow" ]]; then
+            printf 'workflow: %s\n' "$(yaml_quote "$workflow")"
+        fi
+    } > "$PENDING_FILE"
 }
 
 usage() {
@@ -29,18 +40,15 @@ EOF
 }
 
 add_project() {
-    local dir
-    dir="$(urlencode "$PWD")"
-
     echo "Adding current directory as LaborForest project"
 
-    open "laborforest://add-project?path=${dir}"
+    write_pending "add-project"
+
+    open "laborforest://add-project"
 }
 
 run_workflow() {
     local workflow="$1"
-    local dir
-    dir="$(urlencode "$PWD")"
 
     if [[ -z "$workflow" ]]; then
         usage
@@ -54,7 +62,9 @@ run_workflow() {
 
     echo "Running workflow: ${workflow}"
 
-    open "laborforest://run-workflow?path=${dir}&workflow=$(urlencode "$workflow")"
+    write_pending "run-workflow" "$workflow"
+
+    open "laborforest://run-workflow"
 }
 
 case "${1-}" in
