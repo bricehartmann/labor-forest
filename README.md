@@ -1,7 +1,27 @@
-# 🌲 LaborForest
-A desktop app for MacOS to manage git worktrees and local workflows.
+# 💪🌲 LaborForest
+A desktop app for macOS to manage git worktrees and local action workflows.
 
-## Starting from scratch
+## Documentation
+Please read the documentation below:
+- [Introduction](docs/introduction.md)
+- [Dashboard](docs/dashboard.md)
+- [Settings](docs/settings.md)
+- [Projects](docs/projects.md)
+- [Workspaces](docs/workspaces.md)
+- [Workflows](docs/workflows.md)
+- [Example with Laravel](docs/example-with-laravel.md)
+
+If you have questions, you can [open an issue](https://github.com/bricehartmann/labor-forest/issues/new).
+
+Pull requests are welcome!
+
+## Tech stack
+- NativePHP + Laravel
+- Livewire
+- Filament
+- TailwindCSS
+
+## Building from source
 Clone the repo and run the command below:
 
 ```shell
