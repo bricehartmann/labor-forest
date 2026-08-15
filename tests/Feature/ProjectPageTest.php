@@ -256,10 +256,25 @@ describe('remove action', function () {
             workflows: $this->workflows,
         );
 
-        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid);
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false);
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->callAction('remove')
+            ->callAction('remove', [])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
+    it('removes the .laborforest directory when the checkbox is ticked', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, true);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['remove_dir' => true])
             ->assertNotified('Project removed')
             ->assertRedirect('/');
     });

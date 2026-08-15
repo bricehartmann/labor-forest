@@ -43,6 +43,7 @@ beforeEach(function () {
     $this->files = [];
     $this->existingPaths = [];
     $this->copiedDirectories = [];
+    $this->deletedDirectories = [];
     $this->workflowFiles = [];
 
     File::shouldReceive('isDirectory')
@@ -75,6 +76,14 @@ beforeEach(function () {
         ->andReturnUsing(function (string $source, string $destination): bool {
             $this->copiedDirectories[] = [$source, $destination];
             $this->directories[] = $destination;
+
+            return true;
+        });
+
+    File::shouldReceive('deleteDirectory')
+        ->andReturnUsing(function (string $path): bool {
+            $this->deletedDirectories[] = $path;
+            $this->directories = array_values(array_filter($this->directories, fn (string $directory) => $directory !== $path));
 
             return true;
         });
@@ -161,6 +170,52 @@ describe('removeProject', function () {
         expect(fn () => $this->projects->removeProject($this->uuid))
             ->toThrow(InvalidProjectsFile::class, 'Expected a list of projects, found string.')
             ->and($this->disk->get($this->path))->toBe("just a string\n");
+    });
+
+    it('deletes the project base directory when asked to remove it', function () {
+        $this->disk->put($this->path, projectsFile([
+            projectEntry($this->uuid, '/tmp/one', 200),
+            projectEntry(secondUuid(), '/tmp/two', 100),
+        ]));
+
+        $this->directories = ['/tmp/one', '/tmp/one/.laborforest', '/tmp/two/.laborforest'];
+
+        $this->projects->removeProject($this->uuid, true);
+
+        expect($this->deletedDirectories)->toBe(['/tmp/one/.laborforest'])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1)
+            ->and(Yaml::parse($this->disk->get($this->path))[0]['path'])->toBe('/tmp/two');
+    });
+
+    it('keeps the project base directory by default', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, '/tmp/one', 200)]));
+
+        $this->directories = ['/tmp/one', '/tmp/one/.laborforest'];
+
+        $this->projects->removeProject($this->uuid);
+
+        expect($this->deletedDirectories)->toBe([])
+            ->and($this->directories)->toContain('/tmp/one/.laborforest');
+    });
+
+    it('deletes nothing when the project base directory does not exist', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, '/tmp/one', 200)]));
+
+        $this->projects->removeProject($this->uuid, true);
+
+        expect($this->deletedDirectories)->toBe([])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toBe([]);
+    });
+
+    it('deletes nothing when the uuid is unknown', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, '/tmp/one', 200)]));
+
+        $this->directories = ['/tmp/one', '/tmp/one/.laborforest'];
+
+        $this->projects->removeProject(secondUuid(), true);
+
+        expect($this->deletedDirectories)->toBe([])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1);
     });
 });
 

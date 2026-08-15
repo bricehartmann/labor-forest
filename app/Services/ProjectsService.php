@@ -54,11 +54,17 @@ class ProjectsService
             ->values();
     }
 
-    public function removeProject(string $uuid): void
+    public function removeProject(string $uuid, bool $removeDir = false): void
     {
         $this->ensureBaseDirectoryExists();
-        $projects = $this->loadProjects()->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid)->values();
-        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
+        $projects = $this->loadProjects();
+        $removedProject = $projects->firstWhere('uuid', $uuid);
+        $remainingProjects = $projects->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid)->values();
+        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($remainingProjects->toArray(), inline: 10));
+
+        if ($removeDir && $removedProject instanceof ProjectData) {
+            $this->removeProjectBaseDirectory($removedProject->path);
+        }
     }
 
     /**
@@ -434,6 +440,15 @@ class ProjectsService
         }
 
         return $pathBaseDir;
+    }
+
+    protected function removeProjectBaseDirectory(string $path): void
+    {
+        $pathBaseDir = $path.DIRECTORY_SEPARATOR.Directory::BASE->value;
+
+        if (\Illuminate\Support\Facades\File::isDirectory($pathBaseDir)) {
+            \Illuminate\Support\Facades\File::deleteDirectory($pathBaseDir);
+        }
     }
 
     /**

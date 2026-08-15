@@ -402,14 +402,18 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->color('danger')
             ->requiresConfirmation()
             ->modalHeading('Remove project')
-            ->modalDescription(new HtmlString('Are you sure you want to remove this project?<br/><br/>This action will not remove the <code class="text-red-600">'.Directory::BASE->value.'</code> directory.'))
+            ->modalDescription(new HtmlString('Are you sure you want to remove this project?<br/><br/>The project directory itself will not be deleted.'))
             ->modalSubmitActionLabel('Remove')
             ->modalCancelActionLabel('Cancel')
             ->modalFooterActionsAlignment(Alignment::End)
-            ->action(function () {
+            ->schema([
+                Checkbox::make('remove_dir')
+                    ->label(new HtmlString('Remove <code class="text-red-600">'.Directory::BASE->value.'</code> directory')),
+            ])
+            ->action(function (array $data) {
                 static::resultNotificationOperation(
-                    callback: function () {
-                        app(ProjectsService::class)->removeProject($this->projectData->uuid);
+                    callback: function () use ($data) {
+                        app(ProjectsService::class)->removeProject($this->projectData->uuid, $data['remove_dir'] ?? false);
 
                         $this->redirect('/');
                     },
