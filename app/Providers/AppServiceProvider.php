@@ -2,15 +2,11 @@
 
 namespace App\Providers;
 
-use App\Listeners\RunPendingCliCommand;
 use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\View\View;
-use Native\Desktop\Events\App\ApplicationBooted;
-use Native\Desktop\Events\App\OpenedFromURL;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -40,20 +36,6 @@ class AppServiceProvider extends ServiceProvider
             PanelsRenderHook::BODY_END,
             fn (): View => view('filament.global.workflow-notifications'),
         );
-    }
-
-    /**
-     * Pick up requests from the `lf` script.
-     *
-     * Registered by hand rather than by discovery: discovery keys off a single event-class type
-     * hint on handle(), and this listener answers to two. OpenedFromURL covers a running app;
-     * ApplicationBooted covers a cold launch, whose deeplink fires before the PHP server is up
-     * and is swallowed by NativePHP's notifyLaravel().
-     */
-    private function listenForCliCommands(): void
-    {
-        Event::listen(OpenedFromURL::class, RunPendingCliCommand::class);
-        Event::listen(ApplicationBooted::class, RunPendingCliCommand::class);
     }
 
     /**
