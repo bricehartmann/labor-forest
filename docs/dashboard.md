@@ -14,6 +14,8 @@ The current application version installed to your device is shown in widget on t
 
 Clicking `Read the Docs` opens the LaborForest documentation on GitHub in your default web browser.
 
+An installed release opens the documentation as it stood at the version shown in the `App Version` widget, so it always describes the build you are running. Running LaborForest from source opens the documentation on the `main` branch instead.
+
 ## Adding a project
 
 Click the green `Add project` button and select the root of your project directory. The directory must already be a git repository, it must not already be registered with LaborForest, and its git status must be clean. Adding a project with uncommitted changes fails with an error notification.
