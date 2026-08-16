@@ -11,7 +11,6 @@ use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\File as FileName;
 use App\Enums\FileExtension;
-use App\Enums\ProcessOutputType;
 use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
@@ -333,11 +332,7 @@ class RunWorkflow implements ShouldQueue
                 ]);
 
                 $runResult = $this->pendingProcess($workspaceData->path, $env)->start($this->strictShellCommand($command), function (string $type, string $buffer) use (&$output, &$lastOutputBroadcastAt, $logStep, $projectData, $workspaceData, $stepHash): void {
-                    if ($type === ProcessOutputType::STDERR->value) {
-                        $output .= 'STDERR: '.$buffer;
-                    } else {
-                        $output .= $buffer;
-                    }
+                    $output .= $buffer;
 
                     // held in memory only: rewriting the whole log per output chunk would be pathological IO
                     $logStep->output = $output;
