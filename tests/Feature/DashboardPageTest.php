@@ -25,7 +25,7 @@ describe('the query string notification', function () {
             );
     });
 
-    it('shows a success as a transient success notification', function () {
+    it('shows a success as a persistent success notification', function () {
         dashboardWithQuery(['success' => 'Workflow [up] is valid.'])
             ->assertOk()
             ->assertNotified(
@@ -33,6 +33,7 @@ describe('the query string notification', function () {
                     ->success()
                     ->title('Workflow [up] is valid.')
                     ->icon(Heroicon::CheckCircle)
+                    ->persistent()
             );
     });
 
@@ -71,13 +72,24 @@ describe('the query string notification', function () {
     it('ignores a blank parameter', function () {
         dashboardWithQuery(['error' => '', 'success' => ''])
             ->assertOk()
-            ->assertNotNotified();
+            ->assertNotNotified()
+            ->assertJs(componentQueryStringClearingJs());
     });
 
     it('shows nothing when no parameter is given', function () {
         dashboardWithQuery([])
             ->assertOk()
-            ->assertNotNotified();
+            ->assertNotNotified()
+            ->assertNoJs();
+    });
+
+    it('clears the parameters from the address bar so a reload cannot repeat the notification', function () {
+        dashboardWithQuery([
+            'error' => 'Workflow [up] is invalid',
+            'body' => 'The steps field is required.',
+        ])
+            ->assertOk()
+            ->assertJs(componentQueryStringClearingJs());
     });
 });
 

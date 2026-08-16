@@ -17,6 +17,12 @@ trait HasQueryStringNotification
 {
     protected function sendQueryStringNotification(): void
     {
+        $this->sendNotificationFromQueryString();
+        $this->clearQueryStringNotificationParameters();
+    }
+
+    private function sendNotificationFromQueryString(): void
+    {
         $error = $this->queryStringValue(QueryParameter::ERROR);
 
         if ($error !== null) {
@@ -44,6 +50,31 @@ trait HasQueryStringNotification
             ->icon(Heroicon::CheckCircle)
             ->persistent()
             ->send();
+    }
+
+    /**
+     * Drop the parameters from the address bar once the message they carried has been shown.
+     *
+     * The CLI navigates the window to a URL holding the message, so without this a reload — the topbar
+     * refresh button included — would re-mount the page and show the same stale notification again.
+     */
+    private function clearQueryStringNotificationParameters(): void
+    {
+        $parameters = array_column(QueryParameter::cases(), 'value');
+
+        if (array_intersect_key(request()->query(), array_flip($parameters)) === []) {
+            return;
+        }
+
+        $encodedParameters = json_encode($parameters);
+
+        // Alpine only wraps an expression in an async closure when it opens with `let`, `const` or
+        // `if (`, so this statement list has to start with the declaration to parse at all
+        $this->js(<<<JS
+            const url = new URL(window.location.href);
+            {$encodedParameters}.forEach((parameter) => url.searchParams.delete(parameter));
+            window.history.replaceState({}, '', url);
+        JS);
     }
 
     /**

@@ -81,6 +81,21 @@ function something()
 */
 
 /**
+ * The JS a page evaluates to strip the notification parameters off the address bar.
+ *
+ * Spelled out rather than rebuilt from QueryParameter, so a change to what the page emits has to be
+ * made here too.
+ */
+function componentQueryStringClearingJs(): string
+{
+    return <<<'JS'
+        const url = new URL(window.location.href);
+        ["error","success","body"].forEach((parameter) => url.searchParams.delete(parameter));
+        window.history.replaceState({}, '', url);
+    JS;
+}
+
+/**
  * A project rooted at a fixed path that is never created on disk.
  */
 function componentProjectData(

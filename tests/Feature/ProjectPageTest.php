@@ -73,7 +73,7 @@ describe('mount', function () {
             ->assertSet('loadedInvalidMessage', "Project with UUID '{$this->uuid}' not found.");
     });
 
-    it('shows a query string success as a transient notification', function () {
+    it('shows a query string success as a persistent notification', function () {
         projectPageServices(
             project: $this->project,
             workspaces: [$this->workspace],
@@ -88,6 +88,7 @@ describe('mount', function () {
                     ->success()
                     ->title('Workflow [up] is valid.')
                     ->icon(Heroicon::CheckCircle)
+                    ->persistent()
             );
     });
 
@@ -127,7 +128,21 @@ describe('mount', function () {
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
             ->assertOk()
-            ->assertNotNotified();
+            ->assertNotNotified()
+            ->assertNoJs();
+    });
+
+    it('clears the parameters from the address bar so a reload cannot repeat the notification', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::withQueryParams(['success' => 'Workflow [up] is valid.'])
+            ->test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertJs(componentQueryStringClearingJs());
     });
 });
 
