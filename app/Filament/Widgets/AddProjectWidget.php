@@ -68,6 +68,7 @@ class AddProjectWidget extends Widget implements HasActions, HasSchemas
         return Dialog::new()
             ->title('Select Project Directory')
             ->folders()
+            ->defaultPath(getenv('HOME') ?: '/')
             ->open();
     }
 }
