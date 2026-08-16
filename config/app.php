@@ -2,7 +2,24 @@
 
 return [
 
-    'docs_url' => 'https://github.com/bricehartmann/labor-forest/tree/main/docs/_index.md',
+    /*
+    |--------------------------------------------------------------------------
+    | Documentation URL
+    |--------------------------------------------------------------------------
+    |
+    | A packaged build opens the documentation as it stood at the release tag
+    | it was built from, so an older install never reads docs for features it
+    | does not have. Everything else — dev runs and tests — reads "main",
+    | because the version may already be bumped past the newest pushed tag.
+    |
+    */
+
+    'docs_url' => sprintf(
+        'https://github.com/bricehartmann/labor-forest/blob/%s/docs/_index.md',
+        env('APP_ENV') === 'production'
+            ? (env('NATIVEPHP_APP_VERSION') ?: 'main')
+            : 'main',
+    ),
 
     /*
     |--------------------------------------------------------------------------
