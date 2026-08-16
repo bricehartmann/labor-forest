@@ -15,7 +15,7 @@ Please read the documentation below:
 
 If you have questions, you can [open an issue](https://github.com/bricehartmann/labor-forest/issues/new).
 
-Pull requests are welcome!
+Pull requests are welcome! Contributions are accepted under the GPL-3.0-or-later license.
 
 ## Tech stack
 - NativePHP + Laravel
@@ -46,3 +46,14 @@ composer native:build mac arm64
 - `~/.laborforest` - tracks projects and settings
 - `<project>/.laborforest/ignored` - tracks workspace status, holds workflow run logs
 - `<project>/.laborforest/workflows` - holds workflows for the project
+
+## License
+Copyright (C) 2026 Brice Hartmann
+
+LaborForest is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the [GNU General Public License](LICENSE.md) for more details.

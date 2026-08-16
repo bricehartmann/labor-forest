@@ -35,6 +35,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | License URL
+    |--------------------------------------------------------------------------
+    |
+    | Where the dashboard sends a user asking to read the license. A packaged
+    | build points at the license as it stood at the release tag it was built
+    | from — the terms that build was actually conveyed under. Everything
+    | else reads "main", as the documentation URL above does.
+    |
+    */
+
+    'license_url' => sprintf(
+        'https://github.com/bricehartmann/labor-forest/blob/%s/LICENSE.md',
+        env('APP_ENV') === 'production'
+            ? (env('NATIVEPHP_APP_VERSION') ?: 'main')
+            : 'main',
+    ),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Name
     |--------------------------------------------------------------------------
     |

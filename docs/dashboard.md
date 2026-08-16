@@ -32,6 +32,12 @@ LaborForest ships with CLI tools that let you add a `Project` or run a `Workflow
 
 The `Install CLI tools` panel also has a `Dismiss` button. Dismissing hides the panel permanently, and there is no way to bring it back from the UI. To show it again, set `cli_tools_dismissed` to `false` in `~/.laborforest/settings.yaml`.
 
+## License
+
+The panel at the bottom of the dashboard states that LaborForest is free software distributed under the GNU General Public License, version 3 or later, and that it comes with no warranty. The GPL requires an interactive program to show this while it runs, so unlike `Install CLI tools` the panel cannot be dismissed.
+
+Clicking `View the License` opens the full license text on GitHub in your default web browser. As with the documentation, an installed release opens the license as it stood at the version shown in the `App Version` widget — the terms that build was released under — while running LaborForest from source opens the `main` branch.
+
 
 ---
 
