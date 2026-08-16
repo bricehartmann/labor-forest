@@ -22,7 +22,7 @@ class InstallCliToolsWidget extends Widget implements HasActions, HasSchemas
     use InteractsWithActions;
     use InteractsWithSchemas;
 
-    protected static ?int $sort = 2;
+    protected static ?int $sort = 4;
 
     protected string $view = 'filament.widgets.cli-tools-widget';
 

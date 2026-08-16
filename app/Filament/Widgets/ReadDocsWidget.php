@@ -17,7 +17,7 @@ class ReadDocsWidget extends Widget implements HasActions, HasSchemas
     use InteractsWithActions;
     use InteractsWithSchemas;
 
-    protected static ?int $sort = 3;
+    protected static ?int $sort = 2;
 
     protected string $view = 'filament.widgets.read-docs-widget';
 
