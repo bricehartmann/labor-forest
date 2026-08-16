@@ -13,6 +13,7 @@ use App\Enums\WorkflowStatus;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Jobs\RunWorkflow;
 use Illuminate\Support\Carbon;
@@ -102,12 +103,17 @@ class WorkflowService
 
     /**
      * @throws InvalidWorkflowFile
+     * @throws WorkflowNotRunnable
      * @throws WorkspaceNotFound
      */
-    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, array $stepHashes, ?string $parentLogId, int $timeoutSeconds): string
+    public function dispatchWorkflow(string $projectUuid, string $workspacePath, string $workflowName, ?array $stepHashes, ?string $parentLogId, int $timeoutSeconds): string
     {
         $projectService = app(ProjectsService::class);
         $workspaceData = $projectService->loadProjectWorkspace($workspacePath);
+        $workflowData = $this->loadWorkflow($this->workflowPath($workspacePath, $workflowName));
+
+        $this->ensureWorkspaceCanRunWorkflow($workspaceData, $workflowName, $workflowData);
+
         $projectService->updateProjectWorkspaceStatus($workspaceData->path, WorkspaceStatus::PENDING);
         $timestamp = $this->availableLogTimestamp($workspaceData, $workflowName, now()->timestamp);
         $workflowRunLogData = $this->workflowRunLogData(
@@ -116,15 +122,44 @@ class WorkflowService
             workflowName: $workflowName,
             parentLogId: $parentLogId,
             status: WorkflowStatus::PENDING,
-            workflowSteps: $this->loadSteps($workspacePath, $workflowName),
+            workflowSteps: $workflowData->steps,
         );
         $logFileName = $workflowRunLogData->id.'.'.FileExtension::YAML->value;
         $logFilePath = $this->ensureLogFilePathDirectoryExists($workspaceData->path).DIRECTORY_SEPARATOR.$logFileName;
         $this->writeWorkflowLogData($logFilePath, $workflowRunLogData);
 
-        dispatch(new RunWorkflow($timestamp, $projectUuid, $workspacePath, $workflowName, $stepHashes, $parentLogId, $timeoutSeconds));
+        dispatch(new RunWorkflow(
+            timestamp: $timestamp,
+            projectUuid: $projectUuid,
+            workspacePath: $workspacePath,
+            workflowName: $workflowName,
+            stepHashes: $stepHashes,
+            parent: $parentLogId,
+            timeoutSeconds: $timeoutSeconds,
+            // read before the pending write above, so a workflow with no `ending_status` can put the
+            // workspace back where it started instead of stranding it on `pending`
+            statusBeforeRun: $workspaceData->status,
+        ));
 
         return $workflowRunLogData->id;
+    }
+
+    /**
+     * Refuse to start a workflow the workspace is not in a position to run.
+     *
+     * A workflow can name the status the workspace has to be in for it to make sense — an `up`
+     * that boots a suspended workspace should not run against a running one — and no workflow may
+     * be started while another is already working.
+     *
+     * @throws WorkflowNotRunnable
+     */
+    public function ensureWorkspaceCanRunWorkflow(WorkspaceData $workspaceData, string $workflowName, WorkflowData $workflowData): void
+    {
+        if ($workspaceData->status->allowsWorkflowRequiring($workflowData->require_status)) {
+            return;
+        }
+
+        throw new WorkflowNotRunnable($workflowName, $workspaceData->status, $workflowData->require_status);
     }
 
     /**
@@ -132,16 +167,20 @@ class WorkflowService
      */
     public function loadSteps(string $workspacePath, string $workflowName): Collection
     {
-        $workflowPath = implode(DIRECTORY_SEPARATOR, [
+        return $this->loadWorkflow($this->workflowPath($workspacePath, $workflowName))->steps;
+    }
+
+    /**
+     * The path of the file defining the named workflow of a workspace.
+     */
+    public function workflowPath(string $workspacePath, string $workflowName): string
+    {
+        return implode(DIRECTORY_SEPARATOR, [
             $workspacePath,
             Directory::BASE->value,
             Directory::WORKFLOWS->value,
             $workflowName.'.'.FileExtension::YAML->value,
         ]);
-
-        $workflow = $this->loadWorkflow($workflowPath);
-
-        return $workflow->steps;
     }
 
     /**

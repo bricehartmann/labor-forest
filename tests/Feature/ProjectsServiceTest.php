@@ -13,8 +13,9 @@ use App\Exceptions\ProjectDirectoryNotGitRepository;
 use App\Exceptions\ProjectNotFound;
 use App\Exceptions\WorkspaceDirectoryExists;
 use App\Exceptions\WorkspaceNotFound;
-use App\Services\GitService;
+use App\Services\ProcessEnvironmentService;
 use App\Services\ProjectsService;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
@@ -22,10 +23,12 @@ use Illuminate\Support\Str;
 use Symfony\Component\Finder\SplFileInfo;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
-use Tests\Fakes\FakeGitService;
+use Tests\Fakes\FakeProcessEnvironmentService;
+use Tests\Fakes\ProcessSpy;
 
 beforeEach(function () {
     $this->disk = Storage::fake('user_home');
+    $this->extras = Storage::fake('extras');
     $this->path = '.laborforest/projects.yaml';
     $this->projects = new ProjectsService;
     $this->repo = '/tmp/repo';
@@ -34,13 +37,15 @@ beforeEach(function () {
 
     Carbon::setTestNow('2026-08-07 12:00:00');
 
-    $this->git = new FakeGitService;
-    $this->instance(GitService::class, $this->git);
+    // the real GitService now; only the processes underneath it are faked
+    $this->process = ProcessSpy::install();
+    $this->instance(ProcessEnvironmentService::class, new FakeProcessEnvironmentService);
 
     $this->directories = [];
     $this->files = [];
     $this->existingPaths = [];
     $this->copiedDirectories = [];
+    $this->deletedDirectories = [];
     $this->workflowFiles = [];
 
     File::shouldReceive('isDirectory')
@@ -76,6 +81,14 @@ beforeEach(function () {
 
             return true;
         });
+
+    File::shouldReceive('deleteDirectory')
+        ->andReturnUsing(function (string $path): bool {
+            $this->deletedDirectories[] = $path;
+            $this->directories = array_values(array_filter($this->directories, fn (string $directory) => $directory !== $path));
+
+            return true;
+        });
 });
 
 afterEach(function () {
@@ -85,18 +98,18 @@ afterEach(function () {
 
 describe('listProjectLocalBranches', function () {
     it('returns every local branch when workspaces are not filtered out', function () {
-        $this->git->responses = [['ok' => true, 'out' => "feature\nmain\n"]];
+        $this->process->responses = [['ok' => true, 'out' => "feature\nmain\n"]];
 
         $branches = $this->projects->listProjectLocalBranches($this->repo, false);
 
         expect($branches->all())->toBe(['feature', 'main'])
-            ->and($this->git->commands)->toBe([
+            ->and($this->process->commands)->toBe([
                 ["git for-each-ref --format='%(refname:short)' refs/heads", $this->repo],
             ]);
     });
 
     it('rejects the branches that already have a workspace', function () {
-        $this->git->responses = [
+        $this->process->responses = [
             ['ok' => true, 'out' => "feature\nmain\nrelease\n"],
             ['ok' => true, 'out' => implode("\n\n", [
                 worktreePorcelain($this->repo, 'aaa111', 'main'),
@@ -109,12 +122,12 @@ describe('listProjectLocalBranches', function () {
         $branches = $this->projects->listProjectLocalBranches($this->repo, true);
 
         expect($branches->all())->toBe(['release'])
-            ->and($this->git->commands[0][0])->toBe("git for-each-ref --format='%(refname:short)' refs/heads")
-            ->and($this->git->commands[1][0])->toBe('git worktree list --porcelain');
+            ->and($this->process->commands[0][0])->toBe("git for-each-ref --format='%(refname:short)' refs/heads")
+            ->and($this->process->commands[1][0])->toBe('git worktree list --porcelain');
     });
 
     it('keeps every branch when listing the worktrees fails', function () {
-        $this->git->responses = [
+        $this->process->responses = [
             ['ok' => true, 'out' => "feature\nmain\n"],
             ['ok' => false, 'err' => 'fatal: not a git repository'],
         ];
@@ -123,11 +136,11 @@ describe('listProjectLocalBranches', function () {
     });
 
     it('throws before listing the worktrees when listing the branches fails', function () {
-        $this->git->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
+        $this->process->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
 
         expect(fn () => $this->projects->listProjectLocalBranches($this->repo, true))
             ->toThrow(GitOperationFailed::class, 'Failed to list local branches: fatal: not a git repository')
-            ->and($this->git->commands)->toHaveCount(1);
+            ->and($this->process->commands)->toHaveCount(1);
     });
 });
 
@@ -159,6 +172,108 @@ describe('removeProject', function () {
         expect(fn () => $this->projects->removeProject($this->uuid))
             ->toThrow(InvalidProjectsFile::class, 'Expected a list of projects, found string.')
             ->and($this->disk->get($this->path))->toBe("just a string\n");
+    });
+
+    it('deletes the project base directory when asked to remove it', function () {
+        $this->disk->put($this->path, projectsFile([
+            projectEntry($this->uuid, '/tmp/one', 200),
+            projectEntry(secondUuid(), '/tmp/two', 100),
+        ]));
+
+        $this->directories = ['/tmp/one', '/tmp/one/.laborforest', '/tmp/two/.laborforest'];
+
+        $this->projects->removeProject($this->uuid, true);
+
+        expect($this->deletedDirectories)->toBe(['/tmp/one/.laborforest'])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1)
+            ->and(Yaml::parse($this->disk->get($this->path))[0]['path'])->toBe('/tmp/two');
+    });
+
+    it('keeps the project base directory by default', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, '/tmp/one', 200)]));
+
+        $this->directories = ['/tmp/one', '/tmp/one/.laborforest'];
+
+        $this->projects->removeProject($this->uuid);
+
+        expect($this->deletedDirectories)->toBe([])
+            ->and($this->directories)->toContain('/tmp/one/.laborforest');
+    });
+
+    it('deletes nothing when the project base directory does not exist', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, '/tmp/one', 200)]));
+
+        $this->projects->removeProject($this->uuid, true);
+
+        expect($this->deletedDirectories)->toBe([])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toBe([]);
+    });
+
+    it('deletes nothing when the uuid is unknown', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, '/tmp/one', 200)]));
+
+        $this->directories = ['/tmp/one', '/tmp/one/.laborforest'];
+
+        $this->projects->removeProject(secondUuid(), true);
+
+        expect($this->deletedDirectories)->toBe([])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1);
+    });
+
+    it('force removes every linked worktree when asked', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->process->responses = [
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain($this->repo, 'aaa111', 'main'),
+                worktreePorcelain($this->worktree, 'bbb222', 'feature'),
+            ])],
+        ];
+
+        $this->projects->removeProject($this->uuid, false, true);
+
+        expect($this->process->commands)->toBe([
+            ['git worktree list --porcelain', $this->repo],
+            ['git worktree remove --force '.$this->worktree, $this->worktree],
+        ])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toBe([]);
+    });
+
+    it('runs no git when the worktree flag is off', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->directories = [$this->repo, $this->repo.'/.laborforest'];
+
+        $this->projects->removeProject($this->uuid, true);
+
+        expect($this->process->commands)->toBe([])
+            ->and($this->deletedDirectories)->toBe([$this->repo.'/.laborforest']);
+    });
+
+    it('runs no git when the uuid is unknown', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->projects->removeProject(secondUuid(), false, true);
+
+        expect($this->process->commands)->toBe([]);
+    });
+
+    it('keeps the project registered when a worktree removal fails', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->directories = [$this->repo, $this->repo.'/.laborforest'];
+        $this->process->responses = [
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain($this->repo, 'aaa111', 'main'),
+                worktreePorcelain($this->worktree, 'bbb222', 'feature'),
+            ])],
+            ['ok' => false, 'err' => 'fatal: contains modified or untracked files'],
+        ];
+
+        expect(fn () => $this->projects->removeProject($this->uuid, true, true))
+            ->toThrow(GitOperationFailed::class, 'Failed to remove worktree (forced): fatal: contains modified or untracked files')
+            ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1)
+            ->and($this->deletedDirectories)->toBe([]);
     });
 });
 
@@ -219,7 +334,7 @@ describe('updateProject', function () {
 
 describe('addProject', function () {
     it('appends the project and initializes its base directory', function () {
-        $this->directories = [$this->repo, $this->repo.'/.git'];
+        $this->directories = [$this->repo];
 
         $project = $this->projects->addProject($this->repo);
 
@@ -235,14 +350,17 @@ describe('addProject', function () {
                 'command_launch_browser' => null,
                 'command_launch_terminal' => null,
             ]])
-            ->and($this->git->commands)->toBe([['git status --porcelain', $this->repo]])
+            ->and($this->process->commands)->toBe([
+                ['git rev-parse --git-common-dir', $this->repo],
+                ['git status --porcelain', $this->repo],
+            ])
             ->and($this->directories)->toContain('/tmp/repo/.laborforest', '/tmp/repo/.laborforest/ignored')
             ->and($this->files['/tmp/repo/.laborforest/ignored/.gitignore'])->toBe("*\n!.gitignore\n")
             ->and($this->files['/tmp/repo/.laborforest/ignored/status.yaml'])->toBe("status: suspended\n");
     });
 
     it('writes a mapping instead of a list when the stored projects are not already sorted', function () {
-        $this->directories = [$this->repo, $this->repo.'/.git'];
+        $this->directories = [$this->repo];
         $this->disk->put($this->path, projectsFile([
             projectEntry($this->uuid, '/tmp/one', 100),
             projectEntry(secondUuid(), '/tmp/two', 200),
@@ -259,7 +377,7 @@ describe('addProject', function () {
         expect(fn () => $this->projects->addProject($this->repo))
             ->toThrow(ProjectDirectoryNotFound::class, "Project directory '/tmp/repo' not found.")
             ->and($this->disk->exists($this->path))->toBeFalse()
-            ->and($this->git->commands)->toBe([]);
+            ->and($this->process->commands)->toBe([]);
     });
 
     it('throws before checking for a git directory when the project is already known', function () {
@@ -269,33 +387,43 @@ describe('addProject', function () {
         expect(fn () => $this->projects->addProject($this->repo))
             ->toThrow(ProjectDirectoryExists::class, "Project with directory '/tmp/repo' already exists.")
             ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1)
-            ->and($this->git->commands)->toBe([]);
+            ->and($this->process->commands)->toBe([]);
     });
 
-    it('throws before running git when the directory is not a git repository', function () {
+    it('throws before checking the status when git does not recognize the directory as a repository', function () {
         $this->directories = [$this->repo];
+        $this->process->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
 
         expect(fn () => $this->projects->addProject($this->repo))
             ->toThrow(ProjectDirectoryNotGitRepository::class, "Project with directory '/tmp/repo' is not a git repository.")
             ->and($this->disk->get($this->path))->toBe('')
-            ->and($this->git->commands)->toBe([]);
+            ->and($this->process->commands)->toBe([['git rev-parse --git-common-dir', $this->repo]]);
     });
 
     it('throws before writing anything when the repository has uncommitted changes', function () {
-        $this->directories = [$this->repo, $this->repo.'/.git'];
-        $this->git->responses = [['ok' => true, 'out' => "?? a.php\n"]];
+        $this->directories = [$this->repo];
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true, 'out' => "?? a.php\n"],
+        ];
 
         expect(fn () => $this->projects->addProject($this->repo))
             ->toThrow(GitStatusNotClean::class, "Project with directory '/tmp/repo' has uncommitted changes. Commit or stash them before adding the project.")
             ->and($this->disk->get($this->path))->toBe('')
-            ->and($this->git->commands)->toHaveCount(1)
-            ->and($this->directories)->toBe([$this->repo, $this->repo.'/.git']);
+            ->and($this->process->commands)->toHaveCount(2)
+            ->and($this->directories)->toBe([$this->repo]);
     });
 });
 
 describe('addProjectWorkspace', function () {
     it('slugs the branch into a sibling directory and seeds the workspace', function () {
         $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', $this->repo.'/.laborforest/workflows'];
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => worktreePorcelain($this->repo, 'aaa111', 'main')],
+            ['ok' => true, 'out' => ''],
+        ];
 
         $workspace = $this->projects->addProjectWorkspace(
             new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
@@ -309,9 +437,10 @@ describe('addProjectWorkspace', function () {
             ->and($workspace->is_primary)->toBeFalse()
             ->and($workspace->status)->toBe(WorkspaceStatus::SUSPENDED)
             ->and($workspace->git_status)->toBe(GitStatus::CLEAN)
-            ->and($this->git->commands)->toBe([
+            ->and($this->process->commands)->toBe([
                 ['git show-ref --verify --quiet "refs/heads/feature/new thing"', $this->repo],
                 ['git worktree add "/tmp/repo-feature-new-thing" "feature/new thing"', $this->repo],
+                ['git worktree list --porcelain', $this->repo],
                 ['git status --porcelain', '/tmp/repo-feature-new-thing'],
             ])
             ->and($this->copiedDirectories)->toBe([[
@@ -322,10 +451,11 @@ describe('addProjectWorkspace', function () {
 
     it('reports an unknown git status when the workspace status cannot be read', function () {
         $this->directories = [$this->repo, $this->worktree];
-        $this->git->responses = [
+        $this->process->responses = [
             ['ok' => true],
             ['ok' => true],
             ['ok' => true],
+            ['ok' => true, 'out' => worktreePorcelain($this->repo, 'aaa111', 'main')],
             ['ok' => false, 'err' => 'fatal: not a git repository'],
         ];
 
@@ -339,6 +469,96 @@ describe('addProjectWorkspace', function () {
             ->and($this->copiedDirectories)->toBe([]);
     });
 
+    it('seeds from the worktree the base branch is checked out in', function () {
+        $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', '/tmp/repo-develop/.laborforest/workflows'];
+        $this->process->responses = [
+            // the branch, then the base branch, are both checked before the worktree is added
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain($this->repo, 'aaa111', 'main'),
+                worktreePorcelain('/tmp/repo-develop', 'bbb222', 'develop'),
+            ])],
+            ['ok' => true, 'out' => ''],
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            'develop',
+        );
+
+        expect($this->copiedDirectories)->toBe([[
+            '/tmp/repo-develop/.laborforest/workflows',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+        ]]);
+    });
+
+    it('seeds from the branch the project is on when no base branch was chosen', function () {
+        $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', '/tmp/repo-main/.laborforest/workflows'];
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain('/tmp/repo-main', 'aaa111', 'main'),
+                worktreePorcelain('/tmp/repo-develop', 'bbb222', 'develop'),
+            ])],
+            ['ok' => true, 'out' => ''],
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            null,
+        );
+
+        expect($this->copiedDirectories)->toBe([[
+            '/tmp/repo-main/.laborforest/workflows',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+        ]]);
+    });
+
+    it('falls back to the project directory when the base branch has no worktree', function () {
+        $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', $this->repo.'/.laborforest/workflows'];
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => worktreePorcelain($this->repo, 'aaa111', 'main')],
+            ['ok' => true, 'out' => ''],
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            'gone',
+        );
+
+        expect($this->copiedDirectories)->toBe([[
+            '/tmp/repo/.laborforest/workflows',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+        ]]);
+    });
+
+    it('leaves the workflows a committed directory already checked out alone', function () {
+        $this->directories = [
+            $this->repo,
+            '/tmp/repo-feature-new-thing',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+            $this->repo.'/.laborforest/workflows',
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            null,
+        );
+
+        expect($this->copiedDirectories)->toBe([])
+            ->and($this->process->commands)->not->toContain(['git worktree list --porcelain', $this->repo]);
+    });
+
     it('throws before running git when the workspace directory already exists', function () {
         $this->directories = [$this->repo, $this->worktree];
         $this->existingPaths = [$this->worktree];
@@ -349,7 +569,7 @@ describe('addProjectWorkspace', function () {
             null,
         ))
             ->toThrow(WorkspaceDirectoryExists::class, "Workspace with directory '/tmp/repo-feature' already exists.")
-            ->and($this->git->commands)->toBe([])
+            ->and($this->process->commands)->toBe([])
             ->and($this->directories)->toBe([$this->repo, $this->worktree]);
     });
 
@@ -362,14 +582,14 @@ describe('addProjectWorkspace', function () {
             null,
         ))
             ->toThrow(ProjectDirectoryNotFound::class, "Project directory '/tmp/repo-feature' not found.")
-            ->and($this->git->commands)->toHaveCount(2)
+            ->and($this->process->commands)->toHaveCount(2)
             ->and($this->files)->toBe([]);
     });
 });
 
 describe('loadProjectWorkspaces', function () {
     it('maps every worktree to a workspace', function () {
-        $this->git->responses = [
+        $this->process->responses = [
             ['ok' => true, 'out' => implode("\n\n", [
                 worktreePorcelain($this->repo, 'aaa111', 'main'),
                 worktreePorcelain($this->worktree, 'bbb222', 'feature'),
@@ -385,16 +605,16 @@ describe('loadProjectWorkspaces', function () {
             ->and($workspaces->pluck('branch')->all())->toBe(['main', 'feature'])
             ->and($workspaces->pluck('status')->all())->toBe([WorkspaceStatus::UNKNOWN, WorkspaceStatus::UNKNOWN])
             ->and($workspaces->pluck('git_status')->all())->toBe([GitStatus::CLEAN, GitStatus::DIRTY])
-            ->and($this->git->commands)->toBe([
+            ->and($this->process->commands)->toBe([
                 ['git worktree list --porcelain', $this->repo],
                 ['git status --porcelain', $this->repo],
                 ['git status --porcelain', $this->worktree],
             ]);
     });
 
-    it('copies the workflows of the primary worktree into the other workspaces', function () {
+    it('leaves the workflows of every workspace alone', function () {
         $this->directories = [$this->worktree, $this->repo.'/.laborforest/workflows'];
-        $this->git->responses = [
+        $this->process->responses = [
             ['ok' => true, 'out' => implode("\n\n", [
                 worktreePorcelain($this->repo, 'aaa111', 'main'),
                 worktreePorcelain($this->worktree, 'bbb222', 'feature'),
@@ -403,17 +623,14 @@ describe('loadProjectWorkspaces', function () {
 
         $this->projects->loadProjectWorkspaces($this->repo);
 
-        expect($this->copiedDirectories)->toBe([[
-            '/tmp/repo/.laborforest/workflows',
-            '/tmp/repo-feature/.laborforest/workflows',
-        ]]);
+        expect($this->copiedDirectories)->toBe([]);
     });
 
     it('returns an empty collection when listing the worktrees fails', function () {
-        $this->git->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
+        $this->process->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
 
         expect($this->projects->loadProjectWorkspaces($this->repo))->toBeEmpty()
-            ->and($this->git->commands)->toHaveCount(1)
+            ->and($this->process->commands)->toHaveCount(1)
             ->and($this->copiedDirectories)->toBe([]);
     });
 });
@@ -422,7 +639,7 @@ describe('loadProjectWorkspace', function () {
     it('reads the stored status and the git status of the workspace', function () {
         $path = statusFixtureWorkspace($this->files, 'ready');
 
-        $this->git->responses = [
+        $this->process->responses = [
             ['ok' => true, 'out' => worktreePorcelain($path, 'aaa111', 'main')],
             ['ok' => true, 'out' => ''],
         ];
@@ -437,22 +654,22 @@ describe('loadProjectWorkspace', function () {
     });
 
     it('throws when the path is not one of the listed worktrees', function () {
-        $this->git->responses = [
+        $this->process->responses = [
             ['ok' => true, 'out' => worktreePorcelain($this->repo, 'aaa111', 'main')],
         ];
 
         expect(fn () => $this->projects->loadProjectWorkspace($this->worktree))
             ->toThrow(WorkspaceNotFound::class, "Workspace at path '/tmp/repo-feature' not found.")
-            ->and($this->git->commands)->toHaveCount(1)
+            ->and($this->process->commands)->toHaveCount(1)
             ->and($this->files)->toBe([]);
     });
 
     it('throws when listing the worktrees fails', function () {
-        $this->git->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
+        $this->process->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
 
         expect(fn () => $this->projects->loadProjectWorkspace($this->worktree))
             ->toThrow(WorkspaceNotFound::class, "Workspace at path '/tmp/repo-feature' not found.")
-            ->and($this->git->commands)->toHaveCount(1)
+            ->and($this->process->commands)->toHaveCount(1)
             ->and($this->files)->toBe([]);
     });
 });
@@ -511,7 +728,7 @@ describe('loadProjectWorkspaceStatus', function () {
         expect(fn () => $this->projects->loadProjectWorkspaceStatus($path))
             ->toThrow(ParseException::class, 'Malformed inline YAML string at line 2.')
             ->and($this->directories)->toBe([])
-            ->and($this->git->commands)->toBe([]);
+            ->and($this->process->commands)->toBe([]);
     });
 });
 
@@ -635,52 +852,73 @@ describe('loadProjects', function () {
     });
 });
 
-describe('initializeWorkspaceStarterWorkflows', function () {
-    it('writes the starter up and down workflows', function () {
-        $this->directories = [$this->worktree];
+describe('listExampleWorkflowPaths', function () {
+    it('returns every example set directory in order', function () {
+        exampleWorkflowSet($this->extras, 'laravel');
+        exampleWorkflowSet($this->extras, 'bare');
+        exampleWorkflowSet($this->extras, 'vite');
 
-        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree);
+        expect($this->projects->listExampleWorkflowPaths()->all())->toBe([
+            'example-workflows/bare',
+            'example-workflows/laravel',
+            'example-workflows/vite',
+        ]);
+    });
+
+    it('returns nothing when no example sets are bundled', function () {
+        expect($this->projects->listExampleWorkflowPaths()->all())->toBe([]);
+    });
+});
+
+describe('initializeWorkspaceStarterWorkflows', function () {
+    it('copies every workflow of the example set into the workspace', function () {
+        $this->directories = [$this->worktree];
+        exampleWorkflowSet($this->extras, 'laravel', ['up', 'down', 'refresh']);
+
+        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel');
 
         expect($this->directories)->toBe([
             $this->worktree,
             '/tmp/repo-feature/.laborforest',
             '/tmp/repo-feature/.laborforest/workflows',
         ])
-            ->and(Yaml::parse($this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml']))->toBe([
-                'resource_type' => 'workflow',
-                'require_status' => 'suspended',
-                'ending_status' => 'ready',
-                'sort_order' => 0,
-                'steps' => [[
-                    'name' => 'Copy .env file',
-                    'type' => 'shell',
-                    'if' => 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"',
-                    'run' => 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env',
-                ]],
+            ->and(collect($this->files)->keys()->sort()->values()->all())->toBe([
+                '/tmp/repo-feature/.laborforest/workflows/down.yaml',
+                '/tmp/repo-feature/.laborforest/workflows/refresh.yaml',
+                '/tmp/repo-feature/.laborforest/workflows/up.yaml',
             ])
-            ->and(Yaml::parse($this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml']))->toBe([
-                'resource_type' => 'workflow',
-                'require_status' => 'ready',
-                'ending_status' => 'suspended',
-                'sort_order' => 100,
-                'steps' => [],
-            ]);
+            ->and($this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml'])
+            ->toBe(exampleWorkflowYaml('up'));
+    });
+
+    it('ignores files that are not workflow yaml', function () {
+        $this->directories = [$this->worktree];
+        exampleWorkflowSet($this->extras, 'laravel');
+        $this->extras->put('example-workflows/laravel/notes.yaml', "resource_type: run_log\n");
+        $this->extras->put('example-workflows/laravel/broken.yaml', "resource_type: [\n");
+        $this->extras->put('example-workflows/laravel/readme.txt', 'resource_type: workflow');
+
+        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel');
+
+        expect(collect($this->files)->keys()->all())->toBe(['/tmp/repo-feature/.laborforest/workflows/up.yaml']);
     });
 
     it('never overwrites a workflow that already exists', function () {
         $this->directories = [$this->worktree, '/tmp/repo-feature/.laborforest', '/tmp/repo-feature/.laborforest/workflows'];
         $this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml'] = "resource_type: workflow\n";
-        $this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml'] = "resource_type: workflow\n";
+        exampleWorkflowSet($this->extras, 'laravel', ['up', 'down']);
 
-        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree);
+        $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel');
 
         expect($this->files['/tmp/repo-feature/.laborforest/workflows/up.yaml'])->toBe("resource_type: workflow\n")
-            ->and($this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml'])->toBe("resource_type: workflow\n")
+            ->and($this->files['/tmp/repo-feature/.laborforest/workflows/down.yaml'])->toBe(exampleWorkflowYaml('down'))
             ->and($this->directories)->toHaveCount(3);
     });
 
     it('throws when the workspace directory does not exist', function () {
-        expect(fn () => $this->projects->initializeWorkspaceStarterWorkflows($this->worktree))
+        exampleWorkflowSet($this->extras, 'laravel');
+
+        expect(fn () => $this->projects->initializeWorkspaceStarterWorkflows($this->worktree, 'example-workflows/laravel'))
             ->toThrow(ProjectDirectoryNotFound::class, "Project directory '/tmp/repo-feature' not found.")
             ->and($this->files)->toBe([])
             ->and($this->directories)->toBe([]);
@@ -815,4 +1053,24 @@ function workflowFileInfo(string $name): SplFileInfo
     $relativePath = implode(DIRECTORY_SEPARATOR, ['.laborforest', 'workflows', $name]);
 
     return new SplFileInfo(projectFixturePath('workflows'.DIRECTORY_SEPARATOR.$relativePath), '.laborforest'.DIRECTORY_SEPARATOR.'workflows', $relativePath);
+}
+
+/**
+ * The contents of one bundled example workflow, distinct per name so a copy can be matched to its source.
+ */
+function exampleWorkflowYaml(string $name): string
+{
+    return "resource_type: workflow\nsort_order: 0\nsteps:\n  - name: '".$name."'\n    type: shell\n    run: 'true'\n";
+}
+
+/**
+ * Seed a set of example workflows onto the faked extras disk.
+ *
+ * @param  array<int, string>  $names
+ */
+function exampleWorkflowSet(Filesystem $extras, string $set, array $names = ['up']): void
+{
+    foreach ($names as $name) {
+        $extras->put('example-workflows'.DIRECTORY_SEPARATOR.$set.DIRECTORY_SEPARATOR.$name.'.yaml', exampleWorkflowYaml($name));
+    }
 }

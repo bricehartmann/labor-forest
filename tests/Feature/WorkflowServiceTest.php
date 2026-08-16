@@ -10,6 +10,7 @@ use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Jobs\RunWorkflow;
 use App\Services\ProjectsService;
@@ -315,7 +316,7 @@ describe('dispatchWorkflow', function () {
         $this->fixturePath = fixtureWorkspacePath('repo-feature');
         $this->fixtureLogsPath = $this->fixturePath.'/.laborforest/ignored/logs';
         $this->projects = new FakeProjectsService;
-        $this->projects->workspaceData = workflowWorkspaceData($this->fixturePath);
+        $this->projects->workspaceData = workflowWorkspaceData($this->fixturePath, status: WorkspaceStatus::SUSPENDED);
         $this->instance(ProjectsService::class, $this->projects);
 
         $this->logsDirectoryExists = true;
@@ -384,8 +385,16 @@ describe('dispatchWorkflow', function () {
             ->and($job->workflowName)->toBe('up')
             ->and($job->stepHashes)->toBe(['aaa111', 'bbb222'])
             ->and($job->parent)->toBe('parent-log-id')
-            ->and($job->timeout)->toBe(45)
-            ->and($job->ancestorWorkflowNames)->toBe([]);
+            ->and($job->timeoutSeconds)->toBe(45)
+            ->and($job->ancestorWorkflowNames)->toBe([])
+            ->and($job->statusBeforeRun)->toBe(WorkspaceStatus::SUSPENDED);
+    });
+
+    it('hands the job the status the run was dispatched from, not the pending one it writes', function () {
+        $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'up', [], null, 600);
+
+        expect($this->projects->statusUpdates)->toBe([[$this->fixturePath, WorkspaceStatus::PENDING]])
+            ->and(Queue::pushed(RunWorkflow::class)->sole()->statusBeforeRun)->toBe(WorkspaceStatus::SUSPENDED);
     });
 
     it('throws before touching the workspace when the workspace is unknown', function () {
@@ -400,17 +409,78 @@ describe('dispatchWorkflow', function () {
         Queue::assertNothingPushed();
     });
 
-    it('leaves the workspace pending and writes no log when the workflow file is unusable', function () {
+    it('throws before touching the workspace when the workflow file is unusable', function () {
         $path = $this->fixturePath.'/.laborforest/workflows/missing.yaml';
 
         expect(fn () => $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'missing', [], null, 600))
             ->toThrow(InvalidWorkflowFile::class, 'The workflow file ['.$path.'] is invalid: File "'.$path.'" does not exist.')
-            ->and($this->projects->statusUpdates)->toBe([[$this->fixturePath, WorkspaceStatus::PENDING]])
+            ->and($this->projects->statusUpdates)->toBe([])
             ->and($this->madeDirectories)->toBe([])
             ->and($this->writes)->toBe([]);
 
         Queue::assertNothingPushed();
     });
+
+    it('throws before touching the workspace when its status is not the one the workflow requires', function () {
+        $this->projects->workspaceData = workflowWorkspaceData($this->fixturePath, status: WorkspaceStatus::READY);
+
+        expect(fn () => $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'up', [], null, 600))
+            ->toThrow(WorkflowNotRunnable::class, 'Workflow [up] requires the workspace to be suspended, but it is ready.')
+            ->and($this->projects->statusUpdates)->toBe([])
+            ->and($this->writes)->toBe([]);
+
+        Queue::assertNothingPushed();
+    });
+
+    it('throws when the workspace is already working, even for a workflow requiring no status', function () {
+        $this->projects->workspaceData = workflowWorkspaceData($this->fixturePath, status: WorkspaceStatus::WORKING);
+
+        expect(fn () => $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'empty-steps', [], null, 600))
+            ->toThrow(WorkflowNotRunnable::class, 'Workflow [empty-steps] cannot run while the workspace is working.')
+            ->and($this->projects->statusUpdates)->toBe([])
+            ->and($this->writes)->toBe([]);
+
+        Queue::assertNothingPushed();
+    });
+});
+
+describe('ensureWorkspaceCanRunWorkflow', function () {
+    it('passes a workflow requiring no particular status', function () {
+        $this->workflows->ensureWorkspaceCanRunWorkflow(
+            workflowWorkspaceData($this->workspacePath, status: WorkspaceStatus::READY),
+            'refresh',
+            componentWorkflowData(requireStatus: null),
+        );
+    })->throwsNoExceptions();
+
+    it('passes when the workspace is in the required status', function () {
+        $this->workflows->ensureWorkspaceCanRunWorkflow(
+            workflowWorkspaceData($this->workspacePath, status: WorkspaceStatus::SUSPENDED),
+            'up',
+            componentWorkflowData(requireStatus: WorkspaceStatus::SUSPENDED),
+        );
+    })->throwsNoExceptions();
+
+    it('throws when the workspace is in a different status than the one required', function () {
+        expect(fn () => $this->workflows->ensureWorkspaceCanRunWorkflow(
+            workflowWorkspaceData($this->workspacePath, status: WorkspaceStatus::READY),
+            'up',
+            componentWorkflowData(requireStatus: WorkspaceStatus::SUSPENDED),
+        ))->toThrow(WorkflowNotRunnable::class, 'Workflow [up] requires the workspace to be suspended, but it is ready.');
+    });
+
+    it('throws for a status no workflow may be started from', function (WorkspaceStatus $status) {
+        expect(fn () => $this->workflows->ensureWorkspaceCanRunWorkflow(
+            workflowWorkspaceData($this->workspacePath, status: $status),
+            'up',
+            componentWorkflowData(requireStatus: $status),
+        ))->toThrow(WorkflowNotRunnable::class, "Workflow [up] requires the workspace to be {$status->value}, but it is {$status->value}.");
+    })->with([
+        WorkspaceStatus::PENDING,
+        WorkspaceStatus::WORKING,
+        WorkspaceStatus::ERROR,
+        WorkspaceStatus::UNKNOWN,
+    ]);
 });
 
 describe('loadSteps', function () {

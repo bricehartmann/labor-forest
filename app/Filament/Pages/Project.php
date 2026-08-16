@@ -2,7 +2,9 @@
 
 namespace App\Filament\Pages;
 
+use App\Concerns\Filament\Pages\HasQueryStringNotification;
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Concerns\Filament\Pages\NormalizesLaunchCommands;
 use App\Data\GitStatusEntryData;
 use App\Data\ProjectData;
 use App\Data\WorkflowData;
@@ -56,10 +58,12 @@ use Throwable;
 
 class Project extends Page implements HasActions, HasSchemas, HasTable
 {
+    use HasQueryStringNotification;
     use HasResultNotificationOperations;
     use InteractsWithActions;
     use InteractsWithSchemas;
     use InteractsWithTable;
+    use NormalizesLaunchCommands;
 
     public ?string $loadedInvalidMessage = null;
 
@@ -97,6 +101,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     public function mount(string $uuid): void
     {
         $this->loadProjectData($uuid);
+        $this->sendQueryStringNotification();
 
         if (session()->get(SessionKey::PROJECT_CREATED->value) !== $uuid) {
             return;
@@ -114,6 +119,11 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         $primaryWorkspace = collect($this->workspaces)->firstWhere('is_primary', true);
 
         return ($primaryWorkspace['git_status'] ?? null) === GitStatus::DIRTY->value;
+    }
+
+    protected function hasLinkedWorkspaces(): bool
+    {
+        return collect($this->workspaces)->contains(fn (array $workspace) => ! ($workspace['is_primary'] ?? false));
     }
 
     protected function reloadData(): void
@@ -184,12 +194,6 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
      */
     protected function isWorkflowActionDisabled(array $record, string $name): bool
     {
-        $status = WorkspaceStatus::from($record['status']);
-
-        if (! $status->ableToRunWorkflow()) {
-            return true;
-        }
-
         $workflow = $this->workflows[$record['path']][$name] ?? null;
 
         if ($workflow === null) {
@@ -198,8 +202,9 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
 
         $requiredStatus = $workflow['require_status'] ?? null;
 
-        return $requiredStatus !== null
-            && $record['status'] !== $requiredStatus;
+        return ! WorkspaceStatus::from($record['status'])->allowsWorkflowRequiring(
+            $requiredStatus === null ? null : WorkspaceStatus::from($requiredStatus),
+        );
     }
 
     public static function getSlug($panel = null): string
@@ -223,13 +228,33 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->closeModalByClickingAway(false)
             ->closeModalByEscaping(false)
             ->modalCloseButton(false)
-            ->modalWidth(Width::Medium)
+            ->modalWidth(Width::Large)
             ->modalIcon(Heroicon::OutlinedExclamationTriangle)
             ->modalHeading('Repository is now dirty')
-            ->modalDescription(new HtmlString('The <code class="text-red-600">'.Directory::BASE->value.'</code> directory has been created inside this project, so the repository now has uncommitted changes.<br/><br/>You can commit them now or handle them yourself later.'))
+            ->modalDescription(new HtmlString('The <code class="text-red-600">'.Directory::BASE->value.'</code> directory has been created inside this project, so the repository now has uncommitted changes.<br/><br/>You can commit them now, exclude the directory from this repository locally, or handle them yourself later.'))
             ->modalSubmitActionLabel('Commit all changes')
-            ->modalCancelActionLabel('Continue without committing')
+            ->modalCancelActionLabel('Do nothing')
             ->modalFooterActionsAlignment(Alignment::End)
+            ->extraModalFooterActions([
+                Action::make('addToGitInfoExclude')
+                    ->label('Add to .git/info/exclude')
+                    ->color('info')
+                    ->cancelParentActions()
+                    ->action(function () {
+                        static::resultNotificationOperation(
+                            callback: function () {
+                                app(GitService::class)->addToGitInfoExclude(
+                                    $this->projectData->path,
+                                    DIRECTORY_SEPARATOR.Directory::BASE->value.DIRECTORY_SEPARATOR,
+                                );
+
+                                $this->reloadData();
+                            },
+                            successTitle: 'Added to .git/info/exclude',
+                            failureBody: fn (Throwable $th) => $th->getMessage(),
+                        );
+                    }),
+            ])
             ->fillForm(fn () => [
                 'commit_message' => 'initialize LaborForest',
             ])
@@ -350,6 +375,30 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->all(), []);
     }
 
+    /**
+     * The git status of a workspace as of the most recent load of the project data.
+     */
+    protected function workspaceGitStatus(string $path): GitStatus
+    {
+        $workspace = collect($this->workspaces)->firstWhere('path', $path);
+
+        return GitStatus::tryFrom($workspace['git_status'] ?? '') ?? GitStatus::UNKNOWN;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function exampleWorkflowOptions(): array
+    {
+        return rescue(fn () => app(ProjectsService::class)
+            ->listExampleWorkflowPaths()
+            ->mapWithKeys(fn (string $path) => [$path => match (true) {
+                basename($path) === 'javascript' => 'JavaScript',
+                default => ucwords(basename($path)),
+            }])
+            ->all(), []);
+    }
+
     public function removeAction(): Action
     {
         return Action::make('remove')
@@ -358,14 +407,26 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->color('danger')
             ->requiresConfirmation()
             ->modalHeading('Remove project')
-            ->modalDescription(new HtmlString('Are you sure you want to remove this project?<br/><br/>This action will not remove the <code class="text-red-600">'.Directory::BASE->value.'</code> directory.'))
+            ->modalDescription(new HtmlString('Are you sure you want to remove this project?<br/><br/>The project directory itself will not be deleted.'))
             ->modalSubmitActionLabel('Remove')
             ->modalCancelActionLabel('Cancel')
             ->modalFooterActionsAlignment(Alignment::End)
-            ->action(function () {
+            ->schema([
+                Checkbox::make('force_remove_worktrees')
+                    ->visible(fn (): bool => $this->hasLinkedWorkspaces())
+                    ->label('Force remove all worktrees')
+                    ->helperText('Deletes every workspace directory except the primary one. Their branches are left in place.'),
+                Checkbox::make('remove_dir')
+                    ->label(new HtmlString('Remove <code class="text-red-600">'.Directory::BASE->value.'</code> directory')),
+            ])
+            ->action(function (array $data) {
                 static::resultNotificationOperation(
-                    callback: function () {
-                        app(ProjectsService::class)->removeProject($this->projectData->uuid);
+                    callback: function () use ($data) {
+                        app(ProjectsService::class)->removeProject(
+                            $this->projectData->uuid,
+                            $data['remove_dir'] ?? false,
+                            $data['force_remove_worktrees'] ?? false,
+                        );
 
                         $this->redirect('/');
                     },
@@ -400,18 +461,21 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->helperText('The command to run to launch a terminal with a working directory of a specific workspace.')
                     ->placeholder($settings->command_launch_terminal ?? 'open "{{ WORKSPACE_DIR }}" -a iterm')
                     ->nullable()
+                    ->dehydrateStateUsing(static::blankToNull(...))
                     ->rules([new ValidVariables]),
                 TextInput::make('command_launch_ide')
                     ->label('Launch IDE command')
                     ->helperText('The command to run to launch a workspace directory in an IDE.')
                     ->placeholder($settings->command_launch_ide ?? 'open "{{ WORKSPACE_DIR }}" -a phpstorm')
                     ->nullable()
+                    ->dehydrateStateUsing(static::blankToNull(...))
                     ->rules([new ValidVariables]),
                 TextInput::make('command_launch_browser')
                     ->label('Launch browser command')
                     ->helperText('The command to run to launch a browser for a specific workspace\'s local site.')
                     ->placeholder($settings->command_launch_browser ?? 'open "{{ ENV_APP_URL }}"')
                     ->nullable()
+                    ->dehydrateStateUsing(static::blankToNull(...))
                     ->rules([new ValidVariables]),
                 KeyValueEntry::make('variables')
                     ->label('Available variables')
@@ -523,18 +587,39 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->label('Launch')
                     ->color('info'),
                 ActionGroup::make([
-                    Action::make('create_starter_workflows')
+                    Action::make('create_example_workflows')
                         ->hidden(fn (array $record) => app(ProjectsService::class)->doesAnyProjectWorkspaceWorkflowExist($record['path']))
-                        ->label('Create starter workflows')
+                        ->label('Create example workflows')
                         ->icon(Heroicon::SquaresPlus)
-                        ->action(function (array $record) {
+                        ->modal()
+                        ->modalWidth(Width::Small)
+                        ->modalHeading('Create Example Workflows')
+                        ->modalDescription('Select the set of example workflows to copy into this workspace.')
+                        ->modalSubmitActionLabel('Create')
+                        ->modalCancelActionLabel('Cancel')
+                        ->modalFooterActionsAlignment(Alignment::End)
+                        ->schema([
+                            Select::make('example_path')
+                                ->label('Example')
+                                ->options(fn () => $this->exampleWorkflowOptions())
+                                ->default(fn () => array_key_first($this->exampleWorkflowOptions()))
+                                ->selectablePlaceholder(false)
+                                ->native(false)
+                                ->required(),
+                        ])
+                        ->action(function (array $record, array $data) {
                             static::resultNotificationOperation(
-                                callback: function () use ($record) {
-                                    app(ProjectsService::class)->initializeWorkspaceStarterWorkflows($record['path']);
+                                callback: function () use ($record, $data): GitStatus {
+                                    app(ProjectsService::class)->initializeWorkspaceStarterWorkflows($record['path'], $data['example_path']);
 
                                     $this->reloadData();
+
+                                    return $this->workspaceGitStatus($record['path']);
                                 },
-                                successTitle: 'Workflows created: up & down',
+                                successTitle: 'Example workflows created',
+                                successBody: fn (GitStatus $gitStatus) => $gitStatus === GitStatus::DIRTY
+                                    ? 'Git branch is now dirty!'
+                                    : null,
                                 failureBody: fn (Throwable $th) => $th->getMessage(),
                             );
                         }),
@@ -582,7 +667,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                             workflowName: $name,
                                             stepHashes: $runSteps,
                                             parentLogId: null,
-                                            timeoutSeconds: $settings->workflow_timeout_seconds,
+                                            timeoutSeconds: $settings->workflow_step_timeout_seconds,
                                         );
 
                                         if ($arguments['watch'] ?? false) {

@@ -37,4 +37,13 @@ enum WorkspaceStatus: string implements HasColor, HasLabel
             default => false,
         };
     }
+
+    /**
+     * Whether a workflow declaring the given require_status may be launched by hand from this status.
+     */
+    public function allowsWorkflowRequiring(?WorkspaceStatus $requiredStatus): bool
+    {
+        return $this->ableToRunWorkflow()
+            && ($requiredStatus === null || $requiredStatus === $this);
+    }
 }

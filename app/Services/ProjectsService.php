@@ -4,8 +4,6 @@ namespace App\Services;
 
 use App\Concerns\Services\ManagesFiles;
 use App\Data\ProjectData;
-use App\Data\WorkflowData;
-use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Data\WorkspaceStatusData;
 use App\Data\WorktreeData;
@@ -14,7 +12,6 @@ use App\Enums\Disk;
 use App\Enums\File;
 use App\Enums\FileExtension;
 use App\Enums\GitStatus;
-use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\GitOperationFailed;
@@ -26,6 +23,7 @@ use App\Exceptions\ProjectDirectoryNotGitRepository;
 use App\Exceptions\ProjectNotFound;
 use App\Exceptions\WorkspaceNotFound;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Finder\SplFileInfo;
@@ -56,11 +54,26 @@ class ProjectsService
             ->values();
     }
 
-    public function removeProject(string $uuid): void
+    /**
+     * @throws GitOperationFailed
+     * @throws InvalidProjectsFile
+     */
+    public function removeProject(string $uuid, bool $removeDir = false, bool $removeWorktrees = false): void
     {
         $this->ensureBaseDirectoryExists();
-        $projects = $this->loadProjects()->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid)->values();
-        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($projects->toArray(), inline: 10));
+        $projects = $this->loadProjects();
+        $removedProject = $projects->firstWhere('uuid', $uuid);
+
+        if ($removeWorktrees && $removedProject instanceof ProjectData) {
+            app(GitService::class)->removeLinkedWorktrees($removedProject->path, force: true);
+        }
+
+        $remainingProjects = $projects->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid)->values();
+        $this->putBaseFile(File::PROJECTS->value, Yaml::dump($remainingProjects->toArray(), inline: 10));
+
+        if ($removeDir && $removedProject instanceof ProjectData) {
+            $this->removeProjectBaseDirectory($removedProject->path);
+        }
     }
 
     /**
@@ -106,7 +119,7 @@ class ProjectsService
             throw new ProjectDirectoryExists($path);
         }
 
-        if (! \Illuminate\Support\Facades\File::isDirectory($path.DIRECTORY_SEPARATOR.'.git')) {
+        if (! app(GitService::class)->isGitRepository($path)) {
             throw new ProjectDirectoryNotGitRepository($path);
         }
 
@@ -147,7 +160,7 @@ class ProjectsService
         );
 
         $this->initializeProjectWorkspaceBaseDirectory($worktreeData->path);
-        $this->syncWorkspaceWorkflowsFromPrimary($projectData->path, $worktreeData->path);
+        $this->seedWorkspaceWorkflowsFromBaseBranch($projectData->path, $baseBranch, $worktreeData->path);
 
         return new WorkspaceData(
             is_primary: false,
@@ -165,13 +178,15 @@ class ProjectsService
     {
         $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []));
 
+        return $worktrees->map(fn (WorktreeData $worktreeData) => $this->makeWorkspaceData($worktreeData));
+    }
+
+    public function loadProjectFromWorkspace(string $path): ?ProjectData
+    {
+        $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []));
         $primaryPath = $worktrees->firstWhere('is_primary', true)?->path;
 
-        if ($primaryPath !== null) {
-            $worktrees->each(fn (WorktreeData $worktreeData) => $this->syncWorkspaceWorkflowsFromPrimary($primaryPath, $worktreeData->path));
-        }
-
-        return $worktrees->map(fn (WorktreeData $worktreeData) => $this->makeWorkspaceData($worktreeData));
+        return $this->loadProjects()->firstWhere('path', $primaryPath);
     }
 
     /**
@@ -324,7 +339,23 @@ class ProjectsService
         }
     }
 
-    public function initializeWorkspaceStarterWorkflows(string $path): void
+    /**
+     * Disk-relative directory paths of the bundled example workflow sets.
+     *
+     * @return Collection<int, string>
+     */
+    public function listExampleWorkflowPaths(): Collection
+    {
+        return collect(Storage::disk(Disk::EXTRAS->value)->directories(Directory::EXAMPLE_WORKFLOWS->value))
+            ->sort()
+            ->values();
+    }
+
+    /**
+     * Copy every workflow of the given example set into the workspace, leaving any
+     * workflow that already exists untouched.
+     */
+    public function initializeWorkspaceStarterWorkflows(string $path, string $examplePath): void
     {
         $pathBaseDir = $this->ensureProjectBaseDirectoryExists($path);
 
@@ -334,46 +365,38 @@ class ProjectsService
             \Illuminate\Support\Facades\File::makeDirectory($pathWorkflowsDir);
         }
 
-        $pathWorkflowUp = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_UP->value;
+        $disk = Storage::disk(Disk::EXTRAS->value);
 
-        if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowUp)) {
-            $stepCopyEnv = new WorkflowStepData(
-                name: 'Copy .env file',
-                type: WorkflowStepType::SHELL,
-                if: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"',
-                run: 'cp "{{ PROJECT_PRIMARY_DIR }}/.env" .env'
-            );
-            $workflowUp = new WorkflowData(
-                require_status: WorkspaceStatus::SUSPENDED,
-                ending_status: WorkspaceStatus::READY,
-                sort_order: 0,
-                steps: collect([$stepCopyEnv]),
-            );
+        collect($disk->files($examplePath))
+            ->filter(fn (string $file) => Str::afterLast($file, '.') === FileExtension::YAML->value)
+            ->filter(function (string $file) use ($disk) {
+                $yaml = rescue(fn () => Yaml::parse($disk->get($file) ?? ''));
 
-            \Illuminate\Support\Facades\File::put($pathWorkflowUp, Yaml::dump($workflowUp->toArray(), inline: 10));
-        }
+                return is_array($yaml) && ($yaml['resource_type'] ?? null) === YamlResourceType::WORKFLOW->value;
+            })
+            ->each(function (string $file) use ($disk, $pathWorkflowsDir) {
+                $destination = $pathWorkflowsDir.DIRECTORY_SEPARATOR.basename($file);
 
-        $pathWorkflowDown = $pathWorkflowsDir.DIRECTORY_SEPARATOR.File::WORKFLOW_DOWN->value;
+                if (\Illuminate\Support\Facades\File::isFile($destination)) {
+                    return;
+                }
 
-        if (! \Illuminate\Support\Facades\File::isFile($pathWorkflowDown)) {
-            $workflowDown = new WorkflowData(
-                require_status: WorkspaceStatus::READY,
-                ending_status: WorkspaceStatus::SUSPENDED,
-                sort_order: 100,
-                steps: collect(),
-            );
-
-            \Illuminate\Support\Facades\File::put($pathWorkflowDown, Yaml::dump($workflowDown->toArray(), inline: 10));
-        }
+                \Illuminate\Support\Facades\File::put($destination, $disk->get($file));
+            });
     }
 
     /**
-     * Git worktrees only materialize tracked files, so a gitignored `.laborforest/workflows`
-     * directory is absent from every new workspace. Seed it from the primary worktree.
+     * Git worktrees only materialize tracked files, so a `.laborforest/workflows` directory kept out
+     * of git is absent from a new workspace. Seed it from the base branch the workspace was created
+     * from, which is where a committed directory would have come from anyway.
+     *
+     * Reading the branch's committed tree would defeat the purpose: the case this exists for is the
+     * one where the directory was never committed. The workspace holding that branch has the files
+     * on disk, so that is the source.
      */
-    protected function syncWorkspaceWorkflowsFromPrimary(string $primaryPath, string $workspacePath): void
+    protected function seedWorkspaceWorkflowsFromBaseBranch(string $projectPath, ?string $baseBranch, string $workspacePath): void
     {
-        if ($primaryPath === $workspacePath) {
+        if ($projectPath === $workspacePath) {
             return;
         }
 
@@ -387,12 +410,13 @@ class ProjectsService
             Directory::WORKFLOWS->value,
         ]);
 
+        // a committed directory arrives with the checkout, which makes this a no-op
         if (\Illuminate\Support\Facades\File::isDirectory($destination)) {
             return;
         }
 
         $source = implode(DIRECTORY_SEPARATOR, [
-            $primaryPath,
+            $this->baseBranchWorktreePath($projectPath, $baseBranch),
             Directory::BASE->value,
             Directory::WORKFLOWS->value,
         ]);
@@ -402,6 +426,24 @@ class ProjectsService
         }
 
         \Illuminate\Support\Facades\File::copyDirectory($source, $destination);
+    }
+
+    /**
+     * Locate the worktree the base branch is checked out in, falling back to the project directory
+     * when the branch has no worktree of its own. A workspace created from an existing branch names
+     * no base branch, so the branch the project itself is on stands in for one.
+     */
+    protected function baseBranchWorktreePath(string $projectPath, ?string $baseBranch): string
+    {
+        $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($projectPath), []));
+
+        $baseBranch ??= $worktrees->firstWhere('is_primary', true)?->branch;
+
+        if ($baseBranch === null) {
+            return $projectPath;
+        }
+
+        return $worktrees->firstWhere('branch', $baseBranch)?->path ?? $projectPath;
     }
 
     public function doesAnyProjectWorkspaceWorkflowExist(string $path): bool
@@ -433,6 +475,15 @@ class ProjectsService
         }
 
         return $pathBaseDir;
+    }
+
+    protected function removeProjectBaseDirectory(string $path): void
+    {
+        $pathBaseDir = $path.DIRECTORY_SEPARATOR.Directory::BASE->value;
+
+        if (\Illuminate\Support\Facades\File::isDirectory($pathBaseDir)) {
+            \Illuminate\Support\Facades\File::deleteDirectory($pathBaseDir);
+        }
     }
 
     /**

@@ -12,6 +12,7 @@ use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Process;
 use Tests\TestCase;
 
 /*
@@ -27,6 +28,13 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
  // ->use(RefreshDatabase::class)
+    ->beforeEach(function () {
+        // Turns recording on while registering no handlers, so any process a test forgot to fake
+        // fails loudly instead of reaching a shell. Neither call works alone: preventStrayProcesses()
+        // does nothing until something is recording, and a bare Process::fake() installs a catch-all
+        // handler that would swallow everything. A test's own Process::fake() merges on top of this.
+        Process::fake([])->preventStrayProcesses();
+    })
     ->in('Feature');
 
 /*
@@ -71,6 +79,21 @@ function something()
 | collide with the service tests' own builders.
 |
 */
+
+/**
+ * The JS a page evaluates to strip the notification parameters off the address bar.
+ *
+ * Spelled out rather than rebuilt from QueryParameter, so a change to what the page emits has to be
+ * made here too.
+ */
+function componentQueryStringClearingJs(): string
+{
+    return <<<'JS'
+        const url = new URL(window.location.href);
+        ["error","success","body"].forEach((parameter) => url.searchParams.delete(parameter));
+        window.history.replaceState({}, '', url);
+    JS;
+}
 
 /**
  * A project rooted at a fixed path that is never created on disk.

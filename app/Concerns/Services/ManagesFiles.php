@@ -27,6 +27,16 @@ trait ManagesFiles
         $this->ensureFileExists($this->makeRelativeBasePath($file), Disk::USER_HOME->value, $contents);
     }
 
+    protected function baseFileExists(string $file): bool
+    {
+        return Storage::disk(Disk::USER_HOME->value)->exists($this->makeRelativeBasePath($file));
+    }
+
+    protected function deleteBaseFile(string $file): void
+    {
+        Storage::disk(Disk::USER_HOME->value)->delete($this->makeRelativeBasePath($file));
+    }
+
     protected function putBaseFile(string $file, string $contents): void
     {
         Storage::disk(Disk::USER_HOME->value)->put($this->makeRelativeBasePath($file), $contents);

@@ -6,7 +6,7 @@
         <x-slot name="description">
             Click the button below to select a directory and add it as a project.
         </x-slot>
-        <div class="flex justify-center">
+        <div class="flex justify-end">
             {{ $this->addProject }}
         </div>
     </x-filament::section>

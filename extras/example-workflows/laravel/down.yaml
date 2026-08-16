@@ -1,0 +1,27 @@
+resource_type: workflow
+require_status: ready
+ending_status: suspended
+sort_order: 100
+steps:
+  - name: 'Empty S3 bucket'
+    type: shell
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm s3://{{ ENV_AWS_BUCKET }} --recursive --include="*"'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Delete S3 bucket'
+    type: shell
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api delete-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Drop MySQL schema'
+    type: shell
+    run: 'mysql -h {{ ENV_DB_HOST }} -P {{ ENV_DB_PORT }} -u {{ ENV_DB_USERNAME }} $([[ -z "{{ ENV_DB_PASSWORD }}" ]] && echo "--skip-password" || echo "-p{{ ENV_DB_PASSWORD }}") -e "DROP DATABASE IF EXISTS {{ ENV_DB_DATABASE }}"'
+  - name: 'Remove Laravel Herd site'
+    type: shell
+    run: 'herd unlink --no-interaction {{ WORKSPACE_SLUG_KEBAB }}'

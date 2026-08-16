@@ -10,7 +10,6 @@ use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationGroup;
 use Filament\Navigation\NavigationItem;
-use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -27,12 +26,12 @@ class AppPanelProvider extends PanelProvider
     public function panel(Panel $panel): Panel
     {
         $projects = rescue(fn () => app(ProjectsService::class)->loadProjects(), collect());
-        $settings = rescue(fn () => app(SettingsService::class)->loadSettings(), new SettingsData);
+        $settings = rescue(fn () => app(SettingsService::class)->loadSettings(), SettingsData::defaults());
 
         return $panel
             ->default()
             ->id('app')
-            ->brandName('🌲 LaborForest')
+            ->brandName('💪🌲 LaborForest')
             ->path('')
             ->viteTheme('resources/css/filament/app/theme.css')
             ->when(
@@ -50,9 +49,6 @@ class AppPanelProvider extends PanelProvider
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
-            ->pages([
-                Dashboard::class,
-            ])
             ->navigationGroups([
                 NavigationGroup::make()
                     ->label(\App\Enums\NavigationGroup::PROJECTS->value)
@@ -63,12 +59,10 @@ class AppPanelProvider extends PanelProvider
                 $projects->map(fn (ProjectData $project) => NavigationItem::make($project->dirName())
                     ->group(\App\Enums\NavigationGroup::PROJECTS->value)
                     ->url('/projects/'.$project->uuid)
-                    ->isActiveWhen(fn () => str(request()->path())->endsWith($project->uuid))
+                    ->isActiveWhen(fn () => str(request()->path())->contains($project->uuid))
                 )->all()
             )
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
-            ->widgets([
-            ])
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,

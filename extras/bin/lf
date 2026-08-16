@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+set -e
+
+BASE_DIR="$HOME/.laborforest"
+PENDING_FILE="$BASE_DIR/pending.yaml"
+
+# YAML single-quoted scalar; embedded quotes are doubled per the spec.
+yaml_quote() {
+    local quote="'"
+
+    printf '%s%s%s' "$quote" "${1//$quote/$quote$quote}" "$quote"
+}
+
+# The deeplink only wakes and focuses the app; this file is the request it reads.
+write_pending() {
+    local command="$1"
+    local workflow="${2-}"
+
+    mkdir -p "$BASE_DIR"
+
+    {
+        printf 'command: %s\n' "$(yaml_quote "$command")"
+        printf 'path: %s\n' "$(yaml_quote "$PWD")"
+
+        if [[ -n "$workflow" ]]; then
+            printf 'workflow: %s\n' "$(yaml_quote "$workflow")"
+        fi
+    } > "$PENDING_FILE"
+}
+
+usage() {
+    cat <<'EOF'
+💪🌲 LaborForest CLI tools
+
+Usage:  lf add-project
+        lf run <workflow>
+        lf validate <workflow>
+        lf --help
+EOF
+}
+
+# Exit unless the named workflow file exists in the current directory's workspace.
+require_workflow_file() {
+    local workflow="$1"
+
+    if [[ -z "$workflow" ]]; then
+        usage
+        exit 0
+    fi
+
+    if [[ ! -f ".laborforest/workflows/${workflow}.yaml" ]]; then
+        printf 'File not found: .laborforest/workflows/%s.yaml\n' "$workflow" >&2
+        exit 1
+    fi
+}
+
+add_project() {
+    echo "Adding current directory as LaborForest project"
+
+    write_pending "add-project"
+
+    open "laborforest://add-project"
+}
+
+run_workflow() {
+    local workflow="$1"
+
+    require_workflow_file "$workflow"
+
+    echo "Running workflow: ${workflow}"
+
+    write_pending "run-workflow" "$workflow"
+
+    open "laborforest://run-workflow"
+}
+
+validate_workflow() {
+    local workflow="$1"
+
+    require_workflow_file "$workflow"
+
+    echo "Validating workflow: ${workflow}"
+
+    write_pending "validate-workflow" "$workflow"
+
+    open "laborforest://validate-workflow"
+}
+
+case "${1-}" in
+    add-project) add_project ;;
+    run) run_workflow "${2-}" ;;
+    validate) validate_workflow "${2-}" ;;
+    --help|'') usage ;;
+    *) printf 'Unknown command; see `lf --help`\n' >&2; exit 1 ;;
+esac

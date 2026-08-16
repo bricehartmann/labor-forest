@@ -27,7 +27,7 @@ describe('mount', function () {
             ->assertOk()
             ->assertSet('loadedInvalidMessage', null)
             ->assertSet('data.dark_mode', false)
-            ->assertSet('data.workflow_timeout_seconds', 600)
+            ->assertSet('data.workflow_step_timeout_seconds', 600)
             ->assertSet('data.command_launch_terminal', $this->terminalExample)
             ->assertSet('data.command_launch_ide', $this->ideExample)
             ->assertSet('data.command_launch_browser', $this->browserExample);
@@ -51,7 +51,7 @@ describe('mount', function () {
                 'The workflow timeout seconds field must be an integer. Unknown variables: {{ NOPE }}.',
             )
             ->assertSet('data.dark_mode', true)
-            ->assertSet('data.workflow_timeout_seconds', 600)
+            ->assertSet('data.workflow_step_timeout_seconds', 600)
             ->assertSet('data.command_launch_terminal', null)
             ->assertSet('data.command_launch_ide', null)
             ->assertSet('data.command_launch_browser', null);
@@ -65,7 +65,7 @@ describe('save', function () {
             $mock->shouldReceive('saveSettings')
                 ->once()
                 ->withArgs(fn (SettingsData $settings) => $settings->dark_mode === true
-                    && $settings->workflow_timeout_seconds === 90
+                    && $settings->workflow_step_timeout_seconds === 90
                     && $settings->command_launch_terminal === 'open "{{ WORKSPACE_DIR }}" -a ghostty'
                     && $settings->command_launch_ide === 'open "{{ WORKSPACE_DIR }}" -a zed'
                     && $settings->command_launch_browser === 'open "{{ ENV_APP_URL }}/dashboard"');
@@ -74,10 +74,31 @@ describe('save', function () {
         Livewire::test(Settings::class)
             ->fillForm([
                 'dark_mode' => true,
-                'workflow_timeout_seconds' => 90,
+                'workflow_step_timeout_seconds' => 90,
                 'command_launch_terminal' => 'open "{{ WORKSPACE_DIR }}" -a ghostty',
                 'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
                 'command_launch_browser' => 'open "{{ ENV_APP_URL }}/dashboard"',
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('Settings saved');
+    });
+
+    it('stores a cleared launch command as null', function () {
+        $this->mock(SettingsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSettings')->andReturn(settingsPageSettingsData());
+            $mock->shouldReceive('saveSettings')
+                ->once()
+                ->withArgs(fn (SettingsData $settings) => $settings->command_launch_terminal === null
+                    && $settings->command_launch_ide === null
+                    && $settings->command_launch_browser === null);
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm([
+                'command_launch_terminal' => '',
+                'command_launch_ide' => '',
+                'command_launch_browser' => '',
             ])
             ->call('save')
             ->assertHasNoFormErrors()
@@ -93,7 +114,7 @@ describe('save', function () {
         });
 
         Livewire::test(Settings::class)
-            ->fillForm(['workflow_timeout_seconds' => 90])
+            ->fillForm(['workflow_step_timeout_seconds' => 90])
             ->call('save')
             ->assertHasNoFormErrors()
             ->assertNotified('Whoops! Something went wrong.')
@@ -111,9 +132,9 @@ describe('validation', function () {
 
     it('rejects a timeout that breaks its rule', function (mixed $timeout, string $rule) {
         Livewire::test(Settings::class)
-            ->fillForm(['workflow_timeout_seconds' => $timeout])
+            ->fillForm(['workflow_step_timeout_seconds' => $timeout])
             ->call('save')
-            ->assertHasFormErrors(['workflow_timeout_seconds' => $rule])
+            ->assertHasFormErrors(['workflow_step_timeout_seconds' => $rule])
             ->assertNotNotified('Settings saved');
     })->with([
         'missing' => [null, 'required'],
@@ -125,7 +146,7 @@ describe('validation', function () {
     it('rejects a launch command that uses an unknown variable', function () {
         Livewire::test(Settings::class)
             ->fillForm([
-                'workflow_timeout_seconds' => 90,
+                'workflow_step_timeout_seconds' => 90,
                 'command_launch_terminal' => 'open "{{ NOPE }}" -a iterm',
             ])
             ->call('save')
@@ -165,7 +186,7 @@ function settingsPageSettingsData(
 ): SettingsData {
     return new SettingsData(
         dark_mode: $darkMode,
-        workflow_timeout_seconds: $workflowTimeoutSeconds,
+        workflow_step_timeout_seconds: $workflowTimeoutSeconds,
         command_launch_ide: $ide,
         command_launch_browser: $browser,
         command_launch_terminal: $terminal,

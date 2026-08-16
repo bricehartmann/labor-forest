@@ -18,7 +18,11 @@ use App\Services\ProjectsService;
 use App\Services\SettingsService;
 use App\Services\WorkflowService;
 use Filament\Actions\Testing\TestAction;
+use Filament\Forms\Components\Select;
+use Filament\Notifications\Notification;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
@@ -67,6 +71,78 @@ describe('mount', function () {
         Livewire::test(Project::class, ['uuid' => $this->uuid])
             ->assertOk()
             ->assertSet('loadedInvalidMessage', "Project with UUID '{$this->uuid}' not found.");
+    });
+
+    it('shows a query string success as a persistent notification', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::withQueryParams(['success' => 'Workflow [up] is valid.'])
+            ->test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertNotified(
+                Notification::make()
+                    ->success()
+                    ->title('Workflow [up] is valid.')
+                    ->icon(Heroicon::CheckCircle)
+                    ->persistent()
+            );
+    });
+
+    /**
+     * The notification must be sent above mount()'s PROJECT_CREATED early return, which this covers by
+     * leaving the session key unset.
+     */
+    it('shows a query string error as a persistent notification listing every problem', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::withQueryParams([
+            'error' => 'Workflow [up] is invalid',
+            'body' => "{$this->workspacePath}/.laborforest/workflows/up.yaml\n• The steps field is required.",
+        ])
+            ->test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertNotified(
+                Notification::make()
+                    ->danger()
+                    ->title('Workflow [up] is invalid')
+                    ->body(new HtmlString("{$this->workspacePath}/.laborforest/workflows/up.yaml<br />\n• The steps field is required."))
+                    ->icon(Heroicon::XCircle)
+                    ->persistent()
+            );
+    });
+
+    it('shows nothing when no notification is on the query string', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertNotNotified()
+            ->assertNoJs();
+    });
+
+    it('clears the parameters from the address bar so a reload cannot repeat the notification', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::withQueryParams(['success' => 'Workflow [up] is valid.'])
+            ->test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertJs(componentQueryStringClearingJs());
     });
 });
 
@@ -138,6 +214,47 @@ describe('projectCreated action', function () {
             ->assertNotified('Changes committed');
     });
 
+    it('adds the base directory to the exclude file instead of committing', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+        );
+
+        $services['git']->shouldReceive('addToGitInfoExclude')->once()->with($this->projectPath, '/.laborforest/');
+        $services['git']->shouldNotReceive('commitAll');
+
+        session()->put(SessionKey::PROJECT_CREATED->value, $this->uuid);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionMounted('projectCreated')
+            ->mountAction('addToGitInfoExclude')
+            ->callMountedAction()
+            ->assertNotified('Added to .git/info/exclude')
+            ->assertActionNotMounted('projectCreated');
+    });
+
+    it('reports a failed exclude and does not reload the project', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+            loadProjectTimes: 1,
+        );
+
+        $services['git']
+            ->shouldReceive('addToGitInfoExclude')
+            ->andThrow(new GitOperationFailed('locate the git directory', 'fatal: not a git repository'));
+
+        session()->put(SessionKey::PROJECT_CREATED->value, $this->uuid);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionMounted('projectCreated')
+            ->mountAction('addToGitInfoExclude')
+            ->callMountedAction()
+            ->assertNotified('Whoops! Something went wrong.');
+    });
+
     it('reports a failed commit and does not reload the project', function () {
         $services = projectPageServices(
             project: $this->project,
@@ -205,6 +322,54 @@ describe('addWorkspace action', function () {
 });
 
 describe('remove action', function () {
+    beforeEach(function () {
+        $this->primaryWorkspace = componentWorkspaceData(
+            path: $this->projectPath,
+            isPrimary: true,
+            branch: 'main',
+        );
+    });
+
+    it('offers the force worktree checkbox when the project has a linked workspace', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace, $this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->mountAction('remove')
+            ->assertSchemaComponentVisible('force_remove_worktrees');
+    });
+
+    it('hides the force worktree checkbox when only the primary workspace exists', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->mountAction('remove')
+            ->assertSchemaComponentHidden('force_remove_worktrees')
+            ->assertSchemaComponentVisible('remove_dir');
+    });
+
+    it('never forces removal while the checkbox is hidden', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false, false);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['force_remove_worktrees' => true])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
     it('removes the project and returns to the dashboard', function () {
         $services = projectPageServices(
             project: $this->project,
@@ -212,12 +377,75 @@ describe('remove action', function () {
             workflows: $this->workflows,
         );
 
-        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid);
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false, false);
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->callAction('remove')
+            ->callAction('remove', [])
             ->assertNotified('Project removed')
             ->assertRedirect('/');
+    });
+
+    it('removes the .laborforest directory when the checkbox is ticked', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, true, false);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['remove_dir' => true])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
+    it('force removes the worktrees when the checkbox is ticked', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false, true);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['force_remove_worktrees' => true])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
+    it('passes both removal options when both checkboxes are ticked', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, true, true);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['remove_dir' => true, 'force_remove_worktrees' => true])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
+    it('reports a failed worktree removal and stays on the page', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']
+            ->shouldReceive('removeProject')
+            ->once()
+            ->andThrow(new GitOperationFailed('remove worktree (forced)', 'contains modified or untracked files'));
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['force_remove_worktrees' => true])
+            ->assertNotified('Whoops! Something went wrong.')
+            ->assertNoRedirect();
     });
 
     it('reports a failed removal and stays on the page', function () {
@@ -257,6 +485,34 @@ describe('editLaunchCommands action', function () {
                 'command_launch_terminal' => 'open "{{ WORKSPACE_DIR }}" -a ghostty',
                 'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
                 'command_launch_browser' => 'open "{{ ENV_APP_URL }}" -a safari',
+            ])
+            ->assertHasNoActionErrors()
+            ->assertNotified('Launch commands updated');
+    });
+
+    it('stores a cleared command as null so the global default applies again', function () {
+        $services = projectPageServices(
+            project: componentProjectData(
+                uuid: $this->uuid,
+                path: $this->projectPath,
+                terminal: 'open "{{ WORKSPACE_DIR }}" -a ghostty',
+            ),
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']
+            ->shouldReceive('updateProject')
+            ->once()
+            ->withArgs(fn (ProjectData $projectData) => $projectData->command_launch_terminal === null
+                && $projectData->command_launch_ide === null
+                && $projectData->command_launch_browser === null);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('editLaunchCommands', [
+                'command_launch_terminal' => '',
+                'command_launch_ide' => '',
+                'command_launch_browser' => '',
             ])
             ->assertHasNoActionErrors()
             ->assertNotified('Launch commands updated');
@@ -358,10 +614,22 @@ describe('launch record actions', function () {
             ->assertActionHidden(TestAction::make('launch_ide')->table('0'))
             ->assertActionHidden(TestAction::make('launch_browser')->table('0'));
     });
+
+    it('keeps the launch action visible for a cleared override the settings still cover', function () {
+        projectPageServices(
+            project: componentProjectData(uuid: $this->uuid, path: $this->projectPath, terminal: ''),
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+            settings: new SettingsData(command_launch_terminal: 'open "{{ WORKSPACE_DIR }}" -a iterm'),
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionVisible(TestAction::make('launch_terminal')->table('0'));
+    });
 });
 
-describe('create_starter_workflows record action', function () {
-    it('seeds the starter workflows into the workspace', function () {
+describe('create_example_workflows record action', function () {
+    it('copies the selected example set into the workspace', function () {
         $services = projectPageServices(
             project: $this->project,
             workspaces: [$this->workspace],
@@ -371,11 +639,61 @@ describe('create_starter_workflows record action', function () {
         $services['projects']
             ->shouldReceive('initializeWorkspaceStarterWorkflows')
             ->once()
-            ->with($this->workspacePath);
+            ->with($this->workspacePath, 'example-workflows/laravel');
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->callAction(TestAction::make('create_starter_workflows')->table('0'))
-            ->assertNotified('Workflows created: up & down');
+            ->callAction(TestAction::make('create_example_workflows')->table('0'), [
+                'example_path' => 'example-workflows/laravel',
+            ])
+            ->assertNotified(
+                Notification::make()
+                    ->success()
+                    ->title('Example workflows created')
+                    ->icon(Heroicon::CheckCircle)
+            );
+    });
+
+    it('warns that the copied workflows made the git branch dirty', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [componentWorkspaceData($this->workspacePath, gitStatus: GitStatus::DIRTY)],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']
+            ->shouldReceive('initializeWorkspaceStarterWorkflows')
+            ->once()
+            ->with($this->workspacePath, 'example-workflows/laravel');
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction(TestAction::make('create_example_workflows')->table('0'), [
+                'example_path' => 'example-workflows/laravel',
+            ])
+            ->assertNotified(
+                Notification::make()
+                    ->success()
+                    ->title('Example workflows created')
+                    ->body('Git branch is now dirty!')
+                    ->icon(Heroicon::CheckCircle)
+            );
+    });
+
+    it('offers every bundled example set, labelled by its directory name', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+            exampleWorkflowPaths: ['example-workflows/bare', 'example-workflows/laravel', 'example-workflows/vite'],
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->mountAction(TestAction::make('create_example_workflows')->table('0'))
+            ->assertFormFieldExists('example_path', fn (Select $field) => $field->getOptions() === [
+                'example-workflows/bare' => 'Bare',
+                'example-workflows/laravel' => 'Laravel',
+                'example-workflows/vite' => 'Vite',
+            ] && ! $field->canSelectPlaceholder() && ! $field->isNative())
+            ->assertActionDataSet(['example_path' => 'example-workflows/bare']);
     });
 
     it('is hidden once the workspace already has a workflow', function () {
@@ -387,10 +705,10 @@ describe('create_starter_workflows record action', function () {
         );
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->assertActionHidden(TestAction::make('create_starter_workflows')->table('0'));
+            ->assertActionHidden(TestAction::make('create_example_workflows')->table('0'));
     });
 
-    it('reports a failed seed and does not reload the project', function () {
+    it('reports a failed copy and does not reload the project', function () {
         $services = projectPageServices(
             project: $this->project,
             workspaces: [$this->workspace],
@@ -404,7 +722,9 @@ describe('create_starter_workflows record action', function () {
             ->andThrow(new RuntimeException('unable to create .laborforest/workflows'));
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
-            ->callAction(TestAction::make('create_starter_workflows')->table('0'))
+            ->callAction(TestAction::make('create_example_workflows')->table('0'), [
+                'example_path' => 'example-workflows/laravel',
+            ])
             ->assertNotified('Whoops! Something went wrong.');
     });
 });
@@ -659,6 +979,7 @@ describe('onProjectDataUpdated listener', function () {
  * @param  array<int, WorkspaceData>  $workspaces
  * @param  array<string, WorkflowData>  $workflows
  * @param  array<int, string>  $branches
+ * @param  array<int, string>  $exampleWorkflowPaths
  * @return array{projects: MockInterface, workflows: MockInterface, settings: MockInterface, git: MockInterface, launch: MockInterface}
  */
 function projectPageServices(
@@ -671,6 +992,7 @@ function projectPageServices(
     array $branches = ['develop', 'main'],
     string $currentBranch = 'main',
     ?int $loadProjectTimes = null,
+    array $exampleWorkflowPaths = ['example-workflows/bare', 'example-workflows/laravel'],
 ): array {
     $settings ??= new SettingsData;
 
@@ -681,6 +1003,7 @@ function projectPageServices(
         $anyWorkflowExists,
         $loadProjectThrows,
         $loadProjectTimes,
+        $exampleWorkflowPaths,
     ) {
         $loadProject = $mock->shouldReceive('loadProject');
 
@@ -697,6 +1020,7 @@ function projectPageServices(
         $mock->shouldReceive('loadProjectWorkspaces')->andReturn(collect($workspaces));
         $mock->shouldReceive('listProjectLocalBranches')->andReturn(collect($branches));
         $mock->shouldReceive('doesAnyProjectWorkspaceWorkflowExist')->andReturn($anyWorkflowExists);
+        $mock->shouldReceive('listExampleWorkflowPaths')->andReturn(collect($exampleWorkflowPaths));
     });
 
     $workflowsMock = projectPageMock(WorkflowService::class, function (MockInterface $mock) use ($workflows) {

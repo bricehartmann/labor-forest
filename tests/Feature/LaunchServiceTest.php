@@ -8,11 +8,14 @@ use App\Enums\WorkspaceStatus;
 use App\Exceptions\InvalidSettingsFile;
 use App\Exceptions\UnresolvedVariable;
 use App\Services\LaunchService;
+use App\Services\ProcessEnvironmentService;
 use App\Services\SettingsService;
 use App\Services\VariableReplacementService;
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
-use Symfony\Component\Process\Process;
+use Tests\Fakes\FakeProcessEnvironmentService;
 
 beforeEach(function () {
     Storage::fake('user_home');
@@ -32,6 +35,7 @@ beforeEach(function () {
 
     $this->instance(SettingsService::class, $this->settings);
     $this->instance(VariableReplacementService::class, $this->variables);
+    $this->instance(ProcessEnvironmentService::class, new FakeProcessEnvironmentService);
 
     $this->project = launchProjectData();
     $this->workspace = launchWorkspaceData();
@@ -83,17 +87,19 @@ describe('launchTerminal', function () {
             ->and($this->launcher->launches)->toBe([]);
     });
 
-    it('never reads the settings for an empty project command', function () {
-        $this->settings->failure = new RuntimeException('The settings must not be read.');
+    it('falls back to the settings command when the project command was cleared', function (?string $command) {
+        $this->launcher->launchTerminal(launchProjectData(terminal: $command), $this->workspace);
 
-        $this->launcher->launchTerminal(launchProjectData(terminal: ''), $this->workspace);
+        expect($this->settings->loads)->toBe(1)
+            ->and($this->launcher->launches)->toBe([
+                ['settings-terminal "/tmp/repo-feature"', $this->worktree],
+            ]);
+    })->with([
+        'an empty string' => [''],
+        'the string zero' => ['0'],
+    ]);
 
-        expect($this->settings->loads)->toBe(0)
-            ->and($this->variables->replacements)->toBe([])
-            ->and($this->launcher->launches)->toBe([]);
-    });
-
-    it('does nothing when the command is falsy', function (?string $command) {
+    it('does nothing when neither the project nor the settings define a command', function (?string $command) {
         $this->settings->settings = new SettingsData;
 
         $this->launcher->launchTerminal(launchProjectData(terminal: $command), $this->workspace);
@@ -166,7 +172,16 @@ describe('launchIde', function () {
             ->and($this->launcher->launches)->toBe([]);
     });
 
-    it('does nothing when the command is falsy', function (?string $command) {
+    it('falls back to the settings command when the project command was cleared', function () {
+        $this->launcher->launchIde(launchProjectData(ide: ''), $this->workspace);
+
+        expect($this->settings->loads)->toBe(1)
+            ->and($this->launcher->launches)->toBe([
+                ['settings-ide "/tmp/repo-feature"', $this->worktree],
+            ]);
+    });
+
+    it('does nothing when neither the project nor the settings define a command', function (?string $command) {
         $this->settings->settings = new SettingsData;
 
         $this->launcher->launchIde(launchProjectData(ide: $command), $this->workspace);
@@ -222,7 +237,16 @@ describe('launchBrowser', function () {
             ->and($this->launcher->launches)->toBe([]);
     });
 
-    it('does nothing when the command is falsy', function (?string $command) {
+    it('falls back to the settings command when the project command was cleared', function () {
+        $this->launcher->launchBrowser(launchProjectData(browser: ''), $this->workspace);
+
+        expect($this->settings->loads)->toBe(1)
+            ->and($this->launcher->launches)->toBe([
+                ['settings-browser "/tmp/repo-feature"', $this->worktree],
+            ]);
+    });
+
+    it('does nothing when neither the project nor the settings define a command', function (?string $command) {
         $this->settings->settings = new SettingsData;
 
         $this->launcher->launchBrowser(launchProjectData(browser: $command), $this->workspace);
@@ -234,6 +258,18 @@ describe('launchBrowser', function () {
         'an empty string' => [''],
         'the string zero' => ['0'],
     ]);
+});
+
+describe('process configuration', function () {
+    it('starts the launch detached, in the workspace, without this application\'s environment', function () {
+        $pending = (new ExposedLaunchService)->pendingLaunchProcess('ide "/tmp/repo-feature"', $this->worktree);
+
+        expect($pending->path)->toBe($this->worktree)
+            ->and($pending->command)->toBe('ide "/tmp/repo-feature"')
+            // without this the process is stopped as soon as launch() returns, killing the editor
+            ->and($pending->options)->toBe(['create_new_console' => true])
+            ->and($pending->environment)->toBe([FakeProcessEnvironmentService::SENTINEL => '1']);
+    });
 });
 
 /**
@@ -278,15 +314,26 @@ final class FakeLaunchService extends LaunchService
      */
     public array $launches = [];
 
-    protected function launchProcess(string $command, string $cwd): Process
+    protected function launchProcess(string $command, string $cwd): PendingProcess
     {
         $this->launches[] = [$command, $cwd];
 
-        $process = Mockery::mock(Process::class);
-        $process->allows('setOptions');
-        $process->allows('start');
+        // faked so that start() resolves to a FakeInvokedProcess rather than opening an editor
+        return Process::fake()->path($cwd)->command($command);
+    }
+}
 
-        return $process;
+/**
+ * A LaunchService that exposes the real launchProcess() so the pending process it builds can be
+ * inspected. The seam cannot be dropped in favour of Process::fake(): the fake path of
+ * PendingProcess::start() builds a Symfony process it never starts, and the create_new_console
+ * option this method sets makes that process's destructor fatal.
+ */
+final class ExposedLaunchService extends LaunchService
+{
+    public function pendingLaunchProcess(string $command, string $cwd): PendingProcess
+    {
+        return $this->launchProcess($command, $cwd);
     }
 }
 

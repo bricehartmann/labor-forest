@@ -4,14 +4,16 @@ namespace App\Services;
 
 use App\Data\GitStatusEntryData;
 use App\Data\WorktreeData;
+use App\Enums\Directory;
+use App\Enums\File;
 use App\Exceptions\GitBranchDoesNotExist;
 use App\Exceptions\GitOperationFailed;
 use App\Exceptions\WorkspaceDirectoryExists;
+use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use RuntimeException;
-use Symfony\Component\Process\Process;
 
 class GitService
 {
@@ -27,7 +29,7 @@ class GitService
         string $branch,
         ?string $baseBranch,
     ): WorktreeData {
-        if (File::exists($newWorktreePath)) {
+        if (\Illuminate\Support\Facades\File::exists($newWorktreePath)) {
             throw new WorkspaceDirectoryExists($newWorktreePath);
         }
 
@@ -41,11 +43,10 @@ class GitService
             throw new RuntimeException('Branch must exist or base branch must be provided; mutually exclusive');
         }
 
-        $process = $this->gitProcess($command, $mainWorktreePath);
-        $process->run();
+        $result = $this->runGit($command, $mainWorktreePath);
 
-        if (! $process->isSuccessful()) {
-            throw new GitOperationFailed('add worktree '.($baseBranch ? '(new branch)' : '(existing branch)'), $process->getErrorOutput());
+        if ($result->failed()) {
+            throw new GitOperationFailed('add worktree '.($baseBranch ? '(new branch)' : '(existing branch)'), $result->errorOutput());
         }
 
         return new WorktreeData(
@@ -69,11 +70,10 @@ class GitService
         $removeWorktreeCommand = $force
             ? 'git worktree remove --force '.$worktreePath
             : 'git worktree remove '.$worktreePath;
-        $removeWorktreeProcess = $this->gitProcess($removeWorktreeCommand, $worktreePath);
-        $removeWorktreeProcess->run();
+        $removeWorktreeResult = $this->runGit($removeWorktreeCommand, $worktreePath);
 
-        if (! $removeWorktreeProcess->isSuccessful()) {
-            throw new GitOperationFailed('remove worktree'.($force ? ' (forced)' : ''), $removeWorktreeProcess->getErrorOutput());
+        if ($removeWorktreeResult->failed()) {
+            throw new GitOperationFailed('remove worktree'.($force ? ' (forced)' : ''), $removeWorktreeResult->errorOutput());
         }
 
         $deleteBranchCommand = match (true) {
@@ -83,13 +83,32 @@ class GitService
         };
 
         if ($deleteBranchCommand) {
-            $deleteBranchProcess = $this->gitProcess($deleteBranchCommand, $mainWorktreePath);
-            $deleteBranchProcess->run();
+            $deleteBranchResult = $this->runGit($deleteBranchCommand, $mainWorktreePath);
 
-            if (! $deleteBranchProcess->isSuccessful()) {
-                throw new GitOperationFailed('delete branch'.($force ? ' (forced)' : ''), $deleteBranchProcess->getErrorOutput());
+            if ($deleteBranchResult->failed()) {
+                throw new GitOperationFailed('delete branch'.($force ? ' (forced)' : ''), $deleteBranchResult->errorOutput());
             }
         }
+    }
+
+    /**
+     * Remove every linked worktree of a repository, leaving the primary worktree and all branches
+     * in place. Aborts on the first failure, so an interrupted run leaves the repository usable.
+     *
+     * @throws GitOperationFailed
+     */
+    public function removeLinkedWorktrees(string $mainWorktreePath, bool $force): void
+    {
+        $this->listWorktrees($mainWorktreePath)
+            ->reject(fn (WorktreeData $worktreeData) => $worktreeData->is_primary)
+            ->each(fn (WorktreeData $worktreeData) => $this->removeWorktree(
+                mainWorktreePath: $mainWorktreePath,
+                worktreePath: $worktreeData->path,
+                branch: $worktreeData->branch ?? '',
+                force: $force,
+                deleteBranch: false,
+                forceDeleteBranch: false,
+            ));
     }
 
     /**
@@ -99,14 +118,13 @@ class GitService
      */
     public function listWorktrees(string $projectPath): Collection
     {
-        $process = $this->gitProcess('git worktree list --porcelain', $projectPath);
-        $process->run();
+        $result = $this->runGit('git worktree list --porcelain', $projectPath);
 
-        if (! $process->isSuccessful()) {
-            throw new GitOperationFailed('list worktrees', $process->getErrorOutput());
+        if ($result->failed()) {
+            throw new GitOperationFailed('list worktrees', $result->errorOutput());
         }
 
-        return collect(explode("\n\n", trim($process->getOutput())))
+        return collect(explode("\n\n", trim($result->output())))
             ->map(fn (string $record, int $key) => $this->parseRecord($record, $key))
             ->filter()
             ->values();
@@ -119,14 +137,13 @@ class GitService
      */
     public function listLocalBranches(string $projectPath): Collection
     {
-        $process = $this->gitProcess("git for-each-ref --format='%(refname:short)' refs/heads", $projectPath);
-        $process->run();
+        $result = $this->runGit("git for-each-ref --format='%(refname:short)' refs/heads", $projectPath);
 
-        if (! $process->isSuccessful()) {
-            throw new GitOperationFailed('list local branches', $process->getErrorOutput());
+        if ($result->failed()) {
+            throw new GitOperationFailed('list local branches', $result->errorOutput());
         }
 
-        return collect(explode("\n", trim($process->getOutput())))
+        return collect(explode("\n", trim($result->output())))
             ->filter()
             ->values();
     }
@@ -138,14 +155,13 @@ class GitService
      */
     public function status(string $projectPath): Collection
     {
-        $process = $this->gitProcess('git status --porcelain', $projectPath);
-        $process->run();
+        $result = $this->runGit('git status --porcelain', $projectPath);
 
-        if (! $process->isSuccessful()) {
-            throw new GitOperationFailed('get status', $process->getErrorOutput());
+        if ($result->failed()) {
+            throw new GitOperationFailed('get status', $result->errorOutput());
         }
 
-        return collect(explode("\n", rtrim($process->getOutput(), "\n")))
+        return collect(explode("\n", rtrim($result->output(), "\n")))
             ->filter(fn (string $line) => strlen($line) > 3)
             ->map(fn (string $line) => new GitStatusEntryData(
                 code: substr($line, 0, 2),
@@ -167,19 +183,45 @@ class GitService
      */
     public function commitAll(string $projectPath, string $message): void
     {
-        $stageProcess = $this->gitProcess('git add --all', $projectPath);
-        $stageProcess->run();
+        $stageResult = $this->runGit('git add --all', $projectPath);
 
-        if (! $stageProcess->isSuccessful()) {
-            throw new GitOperationFailed('stage all changes', $stageProcess->getErrorOutput());
+        if ($stageResult->failed()) {
+            throw new GitOperationFailed('stage all changes', $stageResult->errorOutput());
         }
 
-        $commitProcess = $this->gitProcess('git commit --message '.escapeshellarg($message), $projectPath);
-        $commitProcess->run();
+        $commitResult = $this->runGit('git commit --message '.escapeshellarg($message), $projectPath);
 
-        if (! $commitProcess->isSuccessful()) {
-            throw new GitOperationFailed('commit changes', $commitProcess->getErrorOutput() ?: $commitProcess->getOutput());
+        if ($commitResult->failed()) {
+            throw new GitOperationFailed('commit changes', $commitResult->errorOutput() ?: $commitResult->output());
         }
+    }
+
+    /**
+     * Append an ignore entry to the repository's own exclude file, which keeps the entry local to
+     * this clone instead of committing it. Doing so twice is a no-op.
+     *
+     * @throws GitOperationFailed
+     */
+    public function addToGitInfoExclude(string $projectPath, string $entry): void
+    {
+        $excludePath = $this->gitCommonDirectory($projectPath)
+            .DIRECTORY_SEPARATOR.Directory::GIT_INFO->value
+            .DIRECTORY_SEPARATOR.File::GIT_EXCLUDE->value;
+
+        $contents = \Illuminate\Support\Facades\File::isFile($excludePath)
+            ? \Illuminate\Support\Facades\File::get($excludePath)
+            : '';
+
+        $entry = trim($entry);
+
+        if (collect(explode("\n", $contents))->map(trim(...))->contains($entry)) {
+            return;
+        }
+
+        $separator = ($contents === '' || str_ends_with($contents, "\n")) ? '' : PHP_EOL;
+
+        \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($excludePath));
+        \Illuminate\Support\Facades\File::append($excludePath, $separator.$entry.PHP_EOL);
     }
 
     /**
@@ -187,14 +229,13 @@ class GitService
      */
     public function currentBranch(string $projectPath): string
     {
-        $process = $this->gitProcess('git rev-parse --abbrev-ref HEAD', $projectPath);
-        $process->run();
+        $result = $this->runGit('git rev-parse --abbrev-ref HEAD', $projectPath);
 
-        if (! $process->isSuccessful()) {
-            throw new GitOperationFailed('get current branch', $process->getErrorOutput());
+        if ($result->failed()) {
+            throw new GitOperationFailed('get current branch', $result->errorOutput());
         }
 
-        return trim($process->getOutput());
+        return trim($result->output());
     }
 
     /**
@@ -233,21 +274,46 @@ class GitService
 
     public function doesBranchExist(string $projectPath, string $branch): bool
     {
-        $process = $this->gitProcess('git show-ref --verify --quiet "refs/heads/'.$branch.'"', $projectPath);
-        $process->run();
+        return $this->runGit('git show-ref --verify --quiet "refs/heads/'.$branch.'"', $projectPath)->successful();
+    }
 
-        return $process->isSuccessful();
+    public function isGitRepository(string $path): bool
+    {
+        return $this->runGit('git rev-parse --git-common-dir', $path)->successful();
     }
 
     /**
-     * Build a git process that runs without this application's own environment.
+     * Resolve the repository's common git directory, which is not always a `.git` directory inside
+     * the given path: linked worktrees and submodules point elsewhere, and git reports that path
+     * as absolute while an ordinary checkout reports it relative to the working directory.
+     *
+     * @throws GitOperationFailed
      */
-    protected function gitProcess(string $command, string $cwd): Process
+    protected function gitCommonDirectory(string $projectPath): string
     {
-        return Process::fromShellCommandline(
-            command: $command,
-            cwd: $cwd,
-            env: app(ProcessEnvironmentService::class)->sanitized(),
-        );
+        $result = $this->runGit('git rev-parse --git-common-dir', $projectPath);
+
+        if ($result->failed()) {
+            throw new GitOperationFailed('locate the git directory', $result->errorOutput());
+        }
+
+        $gitDirectory = trim($result->output());
+
+        return str_starts_with($gitDirectory, DIRECTORY_SEPARATOR)
+            ? $gitDirectory
+            : $projectPath.DIRECTORY_SEPARATOR.$gitDirectory;
+    }
+
+    /**
+     * Run a git command in the given directory without this application's own environment.
+     *
+     * Private rather than protected: this is not a test seam. Process::fake() intercepts below it,
+     * so a test doubles the process itself rather than the way one is built.
+     */
+    private function runGit(string $command, string $cwd): ProcessResult
+    {
+        return Process::path($cwd)
+            ->env(app(ProcessEnvironmentService::class)->sanitized())
+            ->run($command);
     }
 }

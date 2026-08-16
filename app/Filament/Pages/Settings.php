@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Concerns\Filament\Pages\NormalizesLaunchCommands;
 use App\Data\SettingsData;
 use App\Enums\Variable;
 use App\Exceptions\InvalidSettingsFile;
@@ -27,6 +28,7 @@ use Livewire\Attributes\Locked;
 class Settings extends Page
 {
     use HasResultNotificationOperations;
+    use NormalizesLaunchCommands;
 
     public ?array $data = [];
 
@@ -59,8 +61,8 @@ class Settings extends Page
                             ->description('Configure how workflows run on your machine.')
                             ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
                             ->schema([
-                                TextInput::make('workflow_timeout_seconds')
-                                    ->label('Timeout')
+                                TextInput::make('workflow_step_timeout_seconds')
+                                    ->label('Timeout per step')
                                     ->numeric()
                                     ->minValue(0)
                                     ->maxValue(3600)
@@ -84,6 +86,7 @@ class Settings extends Page
                             ->helperText('The command to run to launch a terminal with a working directory of a specific workspace.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a iterm')
                             ->nullable()
+                            ->dehydrateStateUsing(static::blankToNull(...))
                             ->rules([new ValidVariables])
                             ->suffixActions([
                                 Action::make('command_launch_terminal_example')
@@ -103,6 +106,7 @@ class Settings extends Page
                             ->helperText('The command to run to launch a workspace directory in an IDE.')
                             ->placeholder('open "{{ WORKSPACE_DIR }}" -a phpstorm')
                             ->nullable()
+                            ->dehydrateStateUsing(static::blankToNull(...))
                             ->rules([new ValidVariables])
                             ->suffixActions([
                                 Action::make('command_launch_ide_example')
@@ -122,6 +126,7 @@ class Settings extends Page
                             ->helperText('The command to run to launch a browser for a specific workspace\'s local site.')
                             ->placeholder('open "{{ ENV_APP_URL }}"')
                             ->nullable()
+                            ->dehydrateStateUsing(static::blankToNull(...))
                             ->rules([new ValidVariables])
                             ->suffixActions([
                                 Action::make('command_launch_browser_example')
@@ -154,7 +159,14 @@ class Settings extends Page
         $data = $this->form->getState();
 
         static::resultNotificationOperation(
-            callback: fn () => app(SettingsService::class)->saveSettings(SettingsData::from($data)),
+            callback: function () use ($data) {
+                $settingsService = app(SettingsService::class);
+
+                $settingsService->saveSettings(SettingsData::from([
+                    ...$settingsService->loadSettings()->toArray(),
+                    ...$data,
+                ]));
+            },
             successTitle: 'Settings saved',
         );
 
