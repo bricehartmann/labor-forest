@@ -25,13 +25,13 @@ describe('loadSettings', function () {
     it('reads the values stored in the file', function () {
         $this->disk->put($this->path, settingsYaml([
             'dark_mode' => false,
-            'workflow_timeout_seconds' => 30,
+            'workflow_step_timeout_seconds' => 30,
         ]));
 
         $settings = $this->settings->loadSettings();
 
         expect($settings->dark_mode)->toBeFalse()
-            ->and($settings->workflow_timeout_seconds)->toBe(30);
+            ->and($settings->workflow_step_timeout_seconds)->toBe(30);
     });
 
     it('fills missing keys from the defaults', function () {
@@ -41,7 +41,7 @@ describe('loadSettings', function () {
 
         expect($settings->dark_mode)->toBeFalse()
             ->and($settings->command_launch_ide)->toBe(SettingsData::defaults()->command_launch_ide)
-            ->and($settings->workflow_timeout_seconds)->toBe(600);
+            ->and($settings->workflow_step_timeout_seconds)->toBe(600);
     });
 
     it('returns the defaults for an empty file rather than throwing', function () {
@@ -65,16 +65,16 @@ describe('loadSettings', function () {
     });
 
     it('throws when the contents fail validation', function () {
-        $this->disk->put($this->path, settingsYaml(['workflow_timeout_seconds' => -1]));
+        $this->disk->put($this->path, settingsYaml(['workflow_step_timeout_seconds' => -1]));
 
         expect(fn () => $this->settings->loadSettings())
-            ->toThrow(InvalidSettingsFile::class, 'workflow timeout seconds');
+            ->toThrow(InvalidSettingsFile::class, 'workflow step timeout seconds');
     });
 
     it('reports every validation problem at once', function () {
         $this->disk->put($this->path, settingsYaml([
             'dark_mode' => 'nope',
-            'workflow_timeout_seconds' => -1,
+            'workflow_step_timeout_seconds' => -1,
         ]));
 
         try {
@@ -92,12 +92,12 @@ describe('loadSettings', function () {
 
 describe('saveSettings', function () {
     it('writes the settings to the file', function () {
-        $this->settings->saveSettings(new SettingsData(dark_mode: false, workflow_timeout_seconds: 45));
+        $this->settings->saveSettings(new SettingsData(dark_mode: false, workflow_step_timeout_seconds: 45));
 
         expect(Yaml::parse($this->disk->get($this->path)))->toBe([
             'dark_mode' => false,
             'cli_tools_dismissed' => false,
-            'workflow_timeout_seconds' => 45,
+            'workflow_step_timeout_seconds' => 45,
             'command_launch_ide' => null,
             'command_launch_browser' => null,
             'command_launch_terminal' => null,
@@ -105,11 +105,11 @@ describe('saveSettings', function () {
     });
 
     it('overwrites the previous contents', function () {
-        $this->disk->put($this->path, settingsYaml(['workflow_timeout_seconds' => 30]));
+        $this->disk->put($this->path, settingsYaml(['workflow_step_timeout_seconds' => 30]));
 
-        $this->settings->saveSettings(new SettingsData(workflow_timeout_seconds: 45));
+        $this->settings->saveSettings(new SettingsData(workflow_step_timeout_seconds: 45));
 
-        expect(Yaml::parse($this->disk->get($this->path))['workflow_timeout_seconds'])->toBe(45);
+        expect(Yaml::parse($this->disk->get($this->path))['workflow_step_timeout_seconds'])->toBe(45);
     });
 });
 
@@ -123,7 +123,7 @@ describe('syncSettingsFile', function () {
 
         expect($written)->toHaveKeys([
             'dark_mode',
-            'workflow_timeout_seconds',
+            'workflow_step_timeout_seconds',
             'command_launch_ide',
             'command_launch_browser',
             'command_launch_terminal',

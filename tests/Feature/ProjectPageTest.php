@@ -417,6 +417,34 @@ describe('editLaunchCommands action', function () {
             ->assertNotified('Launch commands updated');
     });
 
+    it('stores a cleared command as null so the global default applies again', function () {
+        $services = projectPageServices(
+            project: componentProjectData(
+                uuid: $this->uuid,
+                path: $this->projectPath,
+                terminal: 'open "{{ WORKSPACE_DIR }}" -a ghostty',
+            ),
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']
+            ->shouldReceive('updateProject')
+            ->once()
+            ->withArgs(fn (ProjectData $projectData) => $projectData->command_launch_terminal === null
+                && $projectData->command_launch_ide === null
+                && $projectData->command_launch_browser === null);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('editLaunchCommands', [
+                'command_launch_terminal' => '',
+                'command_launch_ide' => '',
+                'command_launch_browser' => '',
+            ])
+            ->assertHasNoActionErrors()
+            ->assertNotified('Launch commands updated');
+    });
+
     it('reports a failed save and does not reload the project', function () {
         $services = projectPageServices(
             project: $this->project,
@@ -512,6 +540,18 @@ describe('launch record actions', function () {
             ->assertActionHidden(TestAction::make('launch_terminal')->table('0'))
             ->assertActionHidden(TestAction::make('launch_ide')->table('0'))
             ->assertActionHidden(TestAction::make('launch_browser')->table('0'));
+    });
+
+    it('keeps the launch action visible for a cleared override the settings still cover', function () {
+        projectPageServices(
+            project: componentProjectData(uuid: $this->uuid, path: $this->projectPath, terminal: ''),
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+            settings: new SettingsData(command_launch_terminal: 'open "{{ WORKSPACE_DIR }}" -a iterm'),
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionVisible(TestAction::make('launch_terminal')->table('0'));
     });
 });
 

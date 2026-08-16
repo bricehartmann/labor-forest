@@ -385,8 +385,16 @@ describe('dispatchWorkflow', function () {
             ->and($job->workflowName)->toBe('up')
             ->and($job->stepHashes)->toBe(['aaa111', 'bbb222'])
             ->and($job->parent)->toBe('parent-log-id')
-            ->and($job->timeout)->toBe(45)
-            ->and($job->ancestorWorkflowNames)->toBe([]);
+            ->and($job->timeoutSeconds)->toBe(45)
+            ->and($job->ancestorWorkflowNames)->toBe([])
+            ->and($job->statusBeforeRun)->toBe(WorkspaceStatus::SUSPENDED);
+    });
+
+    it('hands the job the status the run was dispatched from, not the pending one it writes', function () {
+        $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'up', [], null, 600);
+
+        expect($this->projects->statusUpdates)->toBe([[$this->fixturePath, WorkspaceStatus::PENDING]])
+            ->and(Queue::pushed(RunWorkflow::class)->sole()->statusBeforeRun)->toBe(WorkspaceStatus::SUSPENDED);
     });
 
     it('throws before touching the workspace when the workspace is unknown', function () {

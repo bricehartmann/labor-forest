@@ -1,33 +1,20 @@
 # Example with Laravel
 
 ## Overview
-The below example assumes the following local environment setup for a Laravel project:
-- Laravel Herd Pro
-  - Redis service for cache
-  - MySQL service for database
-  - MinIO service for local S3-compatible storage
+
+This example assumes a Laravel project running on Laravel Herd Pro, using its Redis service for cache, its MySQL service for the database, and its MinIO service for local S3-compatible storage.
 
 ## Workflows
-The below configuration of Workflows allows a developer to:
-- quickly spin up a new development environment for a Laravel project
-- refresh the development environment on demand
-- easily tear down the development environment when work has concluded
+
+The configuration below lets a developer spin up a new development environment for a Laravel project, refresh that environment on demand, and tear it down when the work is finished.
+
+The three Workflows form a cycle through the Workspace statuses. `up` requires `suspended` and ends `ready`, `refresh` requires and ends `ready`, and `down` requires `ready` and ends `suspended`. A new Workspace starts `suspended`, so `up` is the only one of the three available until it has run.
 
 ### Workflow: `up`
-The goals for the Workflow are:
-- Copy the .env file from the Project's primary directory
-- Update the .env file for:
-  - `APP_URL`
-  - `AWS_BUCKET`
-  - `DB_DATABASE`
-  - `REDIS_PREFIX`
-- Create an S3 bucket for the environment, if none exists
-- Create a MySQL schema for the environment, if none exists
-- Install Composer dependencies
-- Install NPM dependencies
-- Build front end assets
-- Link and secure the Laravel Herd local site
-- Migrate and Seed the database (via the `refresh` Workflow)
+
+This Workflow copies the `.env` file from the Project's primary directory, then updates `APP_URL`, `AWS_BUCKET`, `DB_DATABASE`, and `REDIS_PREFIX` in it. It creates an S3 bucket for the environment if none exists, and creates a MySQL schema for the environment if none exists. It then installs Composer dependencies, installs NPM dependencies, builds front end assets, and links and secures the Laravel Herd local site. Its final step runs the `refresh` Workflow as a nested step, which migrates and seeds the database.
+
+The first two steps are guarded so they only run in a linked Workspace, leaving the primary Workspace's own `.env` file alone.
 
 #### `.laborforest/workflows/up.yaml`
 ```yaml
@@ -77,12 +64,10 @@ steps:
 ```
 
 ### Workflow: `refresh`
-The goals for the Workflow are:
-- Drop all tables and migrate the database from scratch
-- Empty the S3 bucket, if it exists
-- Clear the default queue
-- Wipe the logs
-- Run the database seeder
+
+This Workflow drops all tables and migrates the database from scratch, empties the S3 bucket if it exists, clears the default queue, wipes the logs, and runs the database seeder. It resets a Workspace's data without tearing the environment down, so it leaves the Workspace `ready`.
+
+It is run on its own from the `Workflows` menu, and it is also run as the final step of `up`.
 
 #### `.laborforest/workflows/refresh.yaml`
 ```yaml
@@ -96,11 +81,12 @@ steps:
     run: 'php artisan -vvv migrate:fresh'
   - name: 'Empty S3 bucket'
     type: shell
-    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm "s3://{{ ENV_AWS_BUCKET }}/" --recursive --include="*"'
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm s3://{{ ENV_AWS_BUCKET }} --recursive --include="*"'
     env:
-      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
-      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
-      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+        AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+        AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+        AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
   - name: 'Clear the default queue'
     type: shell
     run: 'php artisan queue:clear'
@@ -113,11 +99,10 @@ steps:
 ```
 
 ### Workflow: `down`
-The goals for the Workflow are:
-- Empty the S3 bucket, if it exists
-- Delete the S3 bucket, if it exists
-- Drop the MySQL schema, if it exists
-- Remove the Laravel Herd local site
+
+This Workflow empties the S3 bucket if it exists, deletes that bucket, drops the MySQL schema if it exists, and removes the Laravel Herd local site. It leaves the Workspace `suspended`, which is the status a Workspace must be in before it can be removed and the status `up` requires to run again.
+
+Its `sort_order` of `100` keeps it at the bottom of the `Workflows` menu, away from the Workflows that are run routinely.
 
 #### `.laborforest/workflows/down.yaml`
 ```yaml

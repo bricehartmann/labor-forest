@@ -1,22 +1,30 @@
 # CLI tools
 
 ## Overview
-- NativePHP (via Electron) does not provide a way to specify command line arguments when launching an application
-- A necessary workaround for this was a simple bash script that opens the application using NativePHP's deep linking
+
+NativePHP, via Electron, does not provide a way to specify command line arguments when launching an application. The workaround is a small bash script that writes your request to a file and then wakes the application using NativePHP's deep linking. The application reads the request and acts on it.
 
 ## Installing the CLI tools
-- Use the button on the [Dashboard](dashboard.md) to install CLI tools
-- This will create a bash script `lf` in the directory you specify (defaulting to `/usr/local/bin` if it exists)
-  - You may be prompted for your password depending on the directory you choose
+
+Use the button on the [Dashboard](dashboard.md) to install the CLI tools, then choose the directory to install into. The dialog defaults to `/usr/local/bin` when that directory exists, but you can choose any directory. Pick one that is on your system `PATH`.
+
+The installation creates a symlink named `lf` pointing at the script inside the LaborForest application bundle. Moving, renaming, or deleting LaborForest breaks the installed `lf`.
+
+LaborForest first tries to create the symlink directly. If that is denied, it retries with administrator privileges, which is when macOS prompts you for your password. Cancelling that prompt fails the installation.
+
+There is no uninstall command. To remove the CLI tools, delete the symlink yourself.
 
 ## Using the CLI tools
 ![LaborForest - CLI Tools Help](images/cli-tools-help.png)
 
-- run `lf add-project` to add the current working directory as a Project in LaborForest
-- run `lf run <workflow>` to trigger the run of a Workflow in LaborForest using the current Workspace directory
-- run `lf --help` to display the help message
+Run `lf add-project` to add the current working directory as a Project in LaborForest. The directory must be a git repository with a clean git status, and it must not already be registered, the same requirements the `Add project` button enforces.
+
+Run `lf run <workflow>` to trigger the run of a Workflow in LaborForest using the current Workspace directory. The current directory must be the root of a Workspace, and that Workspace must belong to a registered Project. Running from a subdirectory does not work. The script checks that `.laborforest/workflows/<workflow>.yaml` exists before waking the app, and exits with an error if it does not. A run started this way runs every step of the Workflow, and it is subject to the same status rules as a run started from the UI.
+
+Run `lf --help` to display the help message. Running `lf` with no arguments prints the same message. An unrecognized command prints an error and exits with a non-zero status.
+
+When a command fails inside the application, the app opens on the Dashboard and shows the error as a red notification, because the command runs outside the application window's session.
 
 ### Cold start
-- LaborForest does not need to be running in order to run the above commands
-  - If the LaborForest application is not already running, it will be started before processing your command
 
+LaborForest does not need to be running in order to run the above commands. If the application is not already running, it is started before your command is processed.

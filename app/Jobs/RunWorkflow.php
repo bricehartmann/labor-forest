@@ -53,10 +53,17 @@ class RunWorkflow implements ShouldQueue
     /**
      * Create a new job instance.
      *
+     * The budget is deliberately not named `timeout`: Laravel serializes a job property of that
+     * name into the queue payload and the worker then kills the whole run at that many seconds,
+     * which would cap a multi-step workflow at the budget meant for each of its steps.
+     *
      * @param  ?string  $parent  the run log id of the workflow that started this one, when chained
+     * @param  int  $timeoutSeconds  the per-process budget every step and gate gets, where zero means none
      * @param  array<int, string>  $ancestorWorkflowNames  the names of the workflows above this one in the chain
+     * @param  ?WorkspaceStatus  $statusBeforeRun  the status the workspace held before the run was dispatched,
+     *                                             which a workflow declaring no `ending_status` returns to
      */
-    public function __construct(public int $timestamp, public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null, public int $timeout = 0, public array $ancestorWorkflowNames = [])
+    public function __construct(public int $timestamp, public string $projectUuid, public string $workspacePath, public string $workflowName, public array $stepHashes, public ?string $parent = null, public int $timeoutSeconds = 0, public array $ancestorWorkflowNames = [], public ?WorkspaceStatus $statusBeforeRun = null)
     {
         //
     }
@@ -68,14 +75,16 @@ class RunWorkflow implements ShouldQueue
     {
         Log::info('workflow: job started', $this->logContext([
             'selected_step_count' => count($this->stepHashes),
-            'timeout' => $this->timeout,
+            'timeout_seconds' => $this->timeoutSeconds,
         ]));
 
         $projectService = app(ProjectsService::class);
         $projectData = $projectService->loadProject($this->projectUuid);
 
         $workspaceData = $projectService->loadProjectWorkspace($this->workspacePath);
-        $currentStatus = $projectService->loadProjectWorkspaceStatus($workspaceData->path);
+        // the status on disk is already `pending` by the time this job runs, so the status the run was
+        // dispatched from is the only sound answer for a workflow that declares no `ending_status`
+        $currentStatus = $this->statusBeforeRun ?? $projectService->loadProjectWorkspaceStatus($workspaceData->path);
         $workflowPath = implode(DIRECTORY_SEPARATOR, [
             $workspaceData->path,
             Directory::BASE->value,
@@ -154,10 +163,7 @@ class RunWorkflow implements ShouldQueue
             logId: $this->workflowRunLogData->id,
         ));
 
-        $finalStatus = match (true) {
-            ! $allSuccessful => WorkspaceStatus::ERROR,
-            default => $workflowData->ending_status ?? $currentStatus,
-        };
+        $finalStatus = $this->resolveFinalStatus($allSuccessful, $workflowData->ending_status, $currentStatus);
 
         Log::info('workflow: resolving workspace status', $this->logContext([
             'final_status' => $finalStatus->value,
@@ -169,6 +175,20 @@ class RunWorkflow implements ShouldQueue
         broadcast(new ProjectDataUpdated($projectData->uuid));
 
         Log::info('workflow: job completed', $this->logContext());
+    }
+
+    /**
+     * Resolve the status the workspace is left in once the run finishes.
+     *
+     * A workflow that declares no `ending_status` returns the workspace to where it started rather
+     * than leaving it wherever the run happened to put it.
+     */
+    protected function resolveFinalStatus(bool $allSuccessful, ?WorkspaceStatus $endingStatus, WorkspaceStatus $statusBeforeRun): WorkspaceStatus
+    {
+        return match (true) {
+            ! $allSuccessful => WorkspaceStatus::ERROR,
+            default => $endingStatus ?? $statusBeforeRun,
+        };
     }
 
     /**
@@ -519,8 +539,9 @@ class RunWorkflow implements ShouldQueue
                     ->map(fn (WorkflowStepData $childStep, int $index) => $childStep->hash((string) $index))
                     ->all(),
                 parent: $this->workflowRunLogData->id,
-                timeout: $this->timeout,
+                timeoutSeconds: $this->timeoutSeconds,
                 ancestorWorkflowNames: $chain,
+                statusBeforeRun: $this->statusBeforeRun,
             );
 
             $child->handle();
@@ -602,7 +623,7 @@ class RunWorkflow implements ShouldQueue
     }
 
     /**
-     * Build a pending process for a step, carrying the job's timeout where zero means none.
+     * Build a pending process for a step, carrying the job's per-process budget where zero means none.
      *
      * @param  array<string, string|false>  $env  already sanitized by ProcessEnvironmentService
      */
@@ -611,8 +632,8 @@ class RunWorkflow implements ShouldQueue
         return Process::path($cwd)
             ->env($env)
             ->when(
-                $this->timeout > 0,
-                fn (PendingProcess $pending): PendingProcess => $pending->timeout($this->timeout),
+                $this->timeoutSeconds > 0,
+                fn (PendingProcess $pending): PendingProcess => $pending->timeout($this->timeoutSeconds),
                 fn (PendingProcess $pending): PendingProcess => $pending->forever(),
             );
     }

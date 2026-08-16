@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
+use App\Concerns\Filament\Pages\NormalizesLaunchCommands;
 use App\Data\GitStatusEntryData;
 use App\Data\ProjectData;
 use App\Data\WorkflowData;
@@ -60,6 +61,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     use InteractsWithActions;
     use InteractsWithSchemas;
     use InteractsWithTable;
+    use NormalizesLaunchCommands;
 
     public ?string $loadedInvalidMessage = null;
 
@@ -456,18 +458,21 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                     ->helperText('The command to run to launch a terminal with a working directory of a specific workspace.')
                     ->placeholder($settings->command_launch_terminal ?? 'open "{{ WORKSPACE_DIR }}" -a iterm')
                     ->nullable()
+                    ->dehydrateStateUsing(static::blankToNull(...))
                     ->rules([new ValidVariables]),
                 TextInput::make('command_launch_ide')
                     ->label('Launch IDE command')
                     ->helperText('The command to run to launch a workspace directory in an IDE.')
                     ->placeholder($settings->command_launch_ide ?? 'open "{{ WORKSPACE_DIR }}" -a phpstorm')
                     ->nullable()
+                    ->dehydrateStateUsing(static::blankToNull(...))
                     ->rules([new ValidVariables]),
                 TextInput::make('command_launch_browser')
                     ->label('Launch browser command')
                     ->helperText('The command to run to launch a browser for a specific workspace\'s local site.')
                     ->placeholder($settings->command_launch_browser ?? 'open "{{ ENV_APP_URL }}"')
                     ->nullable()
+                    ->dehydrateStateUsing(static::blankToNull(...))
                     ->rules([new ValidVariables]),
                 KeyValueEntry::make('variables')
                     ->label('Available variables')
@@ -659,7 +664,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                                             workflowName: $name,
                                             stepHashes: $runSteps,
                                             parentLogId: null,
-                                            timeoutSeconds: $settings->workflow_timeout_seconds,
+                                            timeoutSeconds: $settings->workflow_step_timeout_seconds,
                                         );
 
                                         if ($arguments['watch'] ?? false) {

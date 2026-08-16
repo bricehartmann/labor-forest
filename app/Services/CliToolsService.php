@@ -134,7 +134,7 @@ class CliToolsService
             workflowName: $workflow,
             stepHashes: $this->allStepHashes($workspaceData->path, $workflow),
             parentLogId: null,
-            timeoutSeconds: $settings->workflow_timeout_seconds,
+            timeoutSeconds: $settings->workflow_step_timeout_seconds,
         );
 
         return WorkflowLog::getUrl([

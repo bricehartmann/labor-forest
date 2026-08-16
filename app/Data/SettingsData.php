@@ -10,7 +10,7 @@ class SettingsData extends Data
     public function __construct(
         public bool $dark_mode = true,
         public bool $cli_tools_dismissed = false,
-        public int $workflow_timeout_seconds = 600,
+        public int $workflow_step_timeout_seconds = 600,
         public ?string $command_launch_ide = null,
         public ?string $command_launch_browser = null,
         public ?string $command_launch_terminal = null,
@@ -36,7 +36,7 @@ class SettingsData extends Data
                 'required',
                 'boolean',
             ],
-            'workflow_timeout_seconds' => [
+            'workflow_step_timeout_seconds' => [
                 'required',
                 'integer',
                 'min:0',

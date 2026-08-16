@@ -114,7 +114,7 @@ describe('run-workflow', function () {
         $this->mock(SettingsService::class, function (MockInterface $mock) {
             $mock->shouldReceive('loadSettings')
                 ->once()
-                ->andReturn(new SettingsData(workflow_timeout_seconds: 45));
+                ->andReturn(new SettingsData(workflow_step_timeout_seconds: 45));
         });
 
         $this->mock(WorkflowService::class, function (MockInterface $mock) use ($steps, $expectedHashes) {

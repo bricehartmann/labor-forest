@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Data\ProjectData;
+use App\Data\SettingsData;
 use App\Data\WorkspaceData;
+use Closure;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 
@@ -14,7 +16,10 @@ class LaunchService
         $this->launch(
             projectData: $projectData,
             workspaceData: $workspaceData,
-            command: $projectData->command_launch_terminal ?? app(SettingsService::class)->loadSettings()->command_launch_terminal,
+            command: $this->resolveCommand(
+                $projectData->command_launch_terminal,
+                fn (SettingsData $settingsData) => $settingsData->command_launch_terminal,
+            ),
         );
     }
 
@@ -23,7 +28,10 @@ class LaunchService
         $this->launch(
             projectData: $projectData,
             workspaceData: $workspaceData,
-            command: $projectData->command_launch_ide ?? app(SettingsService::class)->loadSettings()->command_launch_ide,
+            command: $this->resolveCommand(
+                $projectData->command_launch_ide,
+                fn (SettingsData $settingsData) => $settingsData->command_launch_ide,
+            ),
         );
     }
 
@@ -32,8 +40,29 @@ class LaunchService
         $this->launch(
             projectData: $projectData,
             workspaceData: $workspaceData,
-            command: $projectData->command_launch_browser ?? app(SettingsService::class)->loadSettings()->command_launch_browser,
+            command: $this->resolveCommand(
+                $projectData->command_launch_browser,
+                fn (SettingsData $settingsData) => $settingsData->command_launch_browser,
+            ),
         );
+    }
+
+    /**
+     * Resolve the command to run, preferring the project's override over the global setting.
+     *
+     * A cleared override reaches this as an empty string rather than null, so the fallback tests the
+     * same way `launch()` does rather than with `??`, which would take that empty string for a
+     * deliberate command and then launch nothing at all.
+     *
+     * @param  Closure(SettingsData): ?string  $settingsCommand
+     */
+    protected function resolveCommand(?string $projectCommand, Closure $settingsCommand): ?string
+    {
+        if ($projectCommand) {
+            return $projectCommand;
+        }
+
+        return $settingsCommand(app(SettingsService::class)->loadSettings());
     }
 
     protected function launch(ProjectData $projectData, WorkspaceData $workspaceData, ?string $command): void

@@ -128,7 +128,18 @@ class WorkflowService
         $logFilePath = $this->ensureLogFilePathDirectoryExists($workspaceData->path).DIRECTORY_SEPARATOR.$logFileName;
         $this->writeWorkflowLogData($logFilePath, $workflowRunLogData);
 
-        dispatch(new RunWorkflow($timestamp, $projectUuid, $workspacePath, $workflowName, $stepHashes, $parentLogId, $timeoutSeconds));
+        dispatch(new RunWorkflow(
+            timestamp: $timestamp,
+            projectUuid: $projectUuid,
+            workspacePath: $workspacePath,
+            workflowName: $workflowName,
+            stepHashes: $stepHashes,
+            parent: $parentLogId,
+            timeoutSeconds: $timeoutSeconds,
+            // read before the pending write above, so a workflow with no `ending_status` can put the
+            // workspace back where it started instead of stranding it on `pending`
+            statusBeforeRun: $workspaceData->status,
+        ));
 
         return $workflowRunLogData->id;
     }

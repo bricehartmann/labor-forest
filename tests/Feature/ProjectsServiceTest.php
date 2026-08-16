@@ -418,6 +418,12 @@ describe('addProject', function () {
 describe('addProjectWorkspace', function () {
     it('slugs the branch into a sibling directory and seeds the workspace', function () {
         $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', $this->repo.'/.laborforest/workflows'];
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => worktreePorcelain($this->repo, 'aaa111', 'main')],
+            ['ok' => true, 'out' => ''],
+        ];
 
         $workspace = $this->projects->addProjectWorkspace(
             new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
@@ -434,6 +440,7 @@ describe('addProjectWorkspace', function () {
             ->and($this->process->commands)->toBe([
                 ['git show-ref --verify --quiet "refs/heads/feature/new thing"', $this->repo],
                 ['git worktree add "/tmp/repo-feature-new-thing" "feature/new thing"', $this->repo],
+                ['git worktree list --porcelain', $this->repo],
                 ['git status --porcelain', '/tmp/repo-feature-new-thing'],
             ])
             ->and($this->copiedDirectories)->toBe([[
@@ -448,6 +455,7 @@ describe('addProjectWorkspace', function () {
             ['ok' => true],
             ['ok' => true],
             ['ok' => true],
+            ['ok' => true, 'out' => worktreePorcelain($this->repo, 'aaa111', 'main')],
             ['ok' => false, 'err' => 'fatal: not a git repository'],
         ];
 
@@ -459,6 +467,96 @@ describe('addProjectWorkspace', function () {
 
         expect($workspace->git_status)->toBe(GitStatus::UNKNOWN)
             ->and($this->copiedDirectories)->toBe([]);
+    });
+
+    it('seeds from the worktree the base branch is checked out in', function () {
+        $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', '/tmp/repo-develop/.laborforest/workflows'];
+        $this->process->responses = [
+            // the branch, then the base branch, are both checked before the worktree is added
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain($this->repo, 'aaa111', 'main'),
+                worktreePorcelain('/tmp/repo-develop', 'bbb222', 'develop'),
+            ])],
+            ['ok' => true, 'out' => ''],
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            'develop',
+        );
+
+        expect($this->copiedDirectories)->toBe([[
+            '/tmp/repo-develop/.laborforest/workflows',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+        ]]);
+    });
+
+    it('seeds from the branch the project is on when no base branch was chosen', function () {
+        $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', '/tmp/repo-main/.laborforest/workflows'];
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain('/tmp/repo-main', 'aaa111', 'main'),
+                worktreePorcelain('/tmp/repo-develop', 'bbb222', 'develop'),
+            ])],
+            ['ok' => true, 'out' => ''],
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            null,
+        );
+
+        expect($this->copiedDirectories)->toBe([[
+            '/tmp/repo-main/.laborforest/workflows',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+        ]]);
+    });
+
+    it('falls back to the project directory when the base branch has no worktree', function () {
+        $this->directories = [$this->repo, '/tmp/repo-feature-new-thing', $this->repo.'/.laborforest/workflows'];
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true],
+            ['ok' => true, 'out' => worktreePorcelain($this->repo, 'aaa111', 'main')],
+            ['ok' => true, 'out' => ''],
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            'gone',
+        );
+
+        expect($this->copiedDirectories)->toBe([[
+            '/tmp/repo/.laborforest/workflows',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+        ]]);
+    });
+
+    it('leaves the workflows a committed directory already checked out alone', function () {
+        $this->directories = [
+            $this->repo,
+            '/tmp/repo-feature-new-thing',
+            '/tmp/repo-feature-new-thing/.laborforest/workflows',
+            $this->repo.'/.laborforest/workflows',
+        ];
+
+        $this->projects->addProjectWorkspace(
+            new ProjectData(uuid: $this->uuid, path: $this->repo, last_opened: 200),
+            'feature/new thing',
+            null,
+        );
+
+        expect($this->copiedDirectories)->toBe([])
+            ->and($this->process->commands)->not->toContain(['git worktree list --porcelain', $this->repo]);
     });
 
     it('throws before running git when the workspace directory already exists', function () {
@@ -514,7 +612,7 @@ describe('loadProjectWorkspaces', function () {
             ]);
     });
 
-    it('copies the workflows of the primary worktree into the other workspaces', function () {
+    it('leaves the workflows of every workspace alone', function () {
         $this->directories = [$this->worktree, $this->repo.'/.laborforest/workflows'];
         $this->process->responses = [
             ['ok' => true, 'out' => implode("\n\n", [
@@ -525,10 +623,7 @@ describe('loadProjectWorkspaces', function () {
 
         $this->projects->loadProjectWorkspaces($this->repo);
 
-        expect($this->copiedDirectories)->toBe([[
-            '/tmp/repo/.laborforest/workflows',
-            '/tmp/repo-feature/.laborforest/workflows',
-        ]]);
+        expect($this->copiedDirectories)->toBe([]);
     });
 
     it('returns an empty collection when listing the worktrees fails', function () {

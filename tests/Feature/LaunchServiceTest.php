@@ -87,17 +87,19 @@ describe('launchTerminal', function () {
             ->and($this->launcher->launches)->toBe([]);
     });
 
-    it('never reads the settings for an empty project command', function () {
-        $this->settings->failure = new RuntimeException('The settings must not be read.');
+    it('falls back to the settings command when the project command was cleared', function (?string $command) {
+        $this->launcher->launchTerminal(launchProjectData(terminal: $command), $this->workspace);
 
-        $this->launcher->launchTerminal(launchProjectData(terminal: ''), $this->workspace);
+        expect($this->settings->loads)->toBe(1)
+            ->and($this->launcher->launches)->toBe([
+                ['settings-terminal "/tmp/repo-feature"', $this->worktree],
+            ]);
+    })->with([
+        'an empty string' => [''],
+        'the string zero' => ['0'],
+    ]);
 
-        expect($this->settings->loads)->toBe(0)
-            ->and($this->variables->replacements)->toBe([])
-            ->and($this->launcher->launches)->toBe([]);
-    });
-
-    it('does nothing when the command is falsy', function (?string $command) {
+    it('does nothing when neither the project nor the settings define a command', function (?string $command) {
         $this->settings->settings = new SettingsData;
 
         $this->launcher->launchTerminal(launchProjectData(terminal: $command), $this->workspace);
@@ -170,7 +172,16 @@ describe('launchIde', function () {
             ->and($this->launcher->launches)->toBe([]);
     });
 
-    it('does nothing when the command is falsy', function (?string $command) {
+    it('falls back to the settings command when the project command was cleared', function () {
+        $this->launcher->launchIde(launchProjectData(ide: ''), $this->workspace);
+
+        expect($this->settings->loads)->toBe(1)
+            ->and($this->launcher->launches)->toBe([
+                ['settings-ide "/tmp/repo-feature"', $this->worktree],
+            ]);
+    });
+
+    it('does nothing when neither the project nor the settings define a command', function (?string $command) {
         $this->settings->settings = new SettingsData;
 
         $this->launcher->launchIde(launchProjectData(ide: $command), $this->workspace);
@@ -226,7 +237,16 @@ describe('launchBrowser', function () {
             ->and($this->launcher->launches)->toBe([]);
     });
 
-    it('does nothing when the command is falsy', function (?string $command) {
+    it('falls back to the settings command when the project command was cleared', function () {
+        $this->launcher->launchBrowser(launchProjectData(browser: ''), $this->workspace);
+
+        expect($this->settings->loads)->toBe(1)
+            ->and($this->launcher->launches)->toBe([
+                ['settings-browser "/tmp/repo-feature"', $this->worktree],
+            ]);
+    });
+
+    it('does nothing when neither the project nor the settings define a command', function (?string $command) {
         $this->settings->settings = new SettingsData;
 
         $this->launcher->launchBrowser(launchProjectData(browser: $command), $this->workspace);

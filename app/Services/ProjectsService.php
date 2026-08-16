@@ -160,7 +160,7 @@ class ProjectsService
         );
 
         $this->initializeProjectWorkspaceBaseDirectory($worktreeData->path);
-        $this->syncWorkspaceWorkflowsFromPrimary($projectData->path, $worktreeData->path);
+        $this->seedWorkspaceWorkflowsFromBaseBranch($projectData->path, $baseBranch, $worktreeData->path);
 
         return new WorkspaceData(
             is_primary: false,
@@ -177,11 +177,6 @@ class ProjectsService
     public function loadProjectWorkspaces(string $path): Collection
     {
         $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($path), []));
-        $primaryPath = $worktrees->firstWhere('is_primary', true)?->path;
-
-        if ($primaryPath !== null) {
-            $worktrees->each(fn (WorktreeData $worktreeData) => $this->syncWorkspaceWorkflowsFromPrimary($primaryPath, $worktreeData->path));
-        }
 
         return $worktrees->map(fn (WorktreeData $worktreeData) => $this->makeWorkspaceData($worktreeData));
     }
@@ -391,12 +386,17 @@ class ProjectsService
     }
 
     /**
-     * Git worktrees only materialize tracked files, so a gitignored `.laborforest/workflows`
-     * directory is absent from every new workspace. Seed it from the primary worktree.
+     * Git worktrees only materialize tracked files, so a `.laborforest/workflows` directory kept out
+     * of git is absent from a new workspace. Seed it from the base branch the workspace was created
+     * from, which is where a committed directory would have come from anyway.
+     *
+     * Reading the branch's committed tree would defeat the purpose: the case this exists for is the
+     * one where the directory was never committed. The workspace holding that branch has the files
+     * on disk, so that is the source.
      */
-    protected function syncWorkspaceWorkflowsFromPrimary(string $primaryPath, string $workspacePath): void
+    protected function seedWorkspaceWorkflowsFromBaseBranch(string $projectPath, ?string $baseBranch, string $workspacePath): void
     {
-        if ($primaryPath === $workspacePath) {
+        if ($projectPath === $workspacePath) {
             return;
         }
 
@@ -410,12 +410,13 @@ class ProjectsService
             Directory::WORKFLOWS->value,
         ]);
 
+        // a committed directory arrives with the checkout, which makes this a no-op
         if (\Illuminate\Support\Facades\File::isDirectory($destination)) {
             return;
         }
 
         $source = implode(DIRECTORY_SEPARATOR, [
-            $primaryPath,
+            $this->baseBranchWorktreePath($projectPath, $baseBranch),
             Directory::BASE->value,
             Directory::WORKFLOWS->value,
         ]);
@@ -425,6 +426,24 @@ class ProjectsService
         }
 
         \Illuminate\Support\Facades\File::copyDirectory($source, $destination);
+    }
+
+    /**
+     * Locate the worktree the base branch is checked out in, falling back to the project directory
+     * when the branch has no worktree of its own. A workspace created from an existing branch names
+     * no base branch, so the branch the project itself is on stands in for one.
+     */
+    protected function baseBranchWorktreePath(string $projectPath, ?string $baseBranch): string
+    {
+        $worktrees = collect(rescue(fn () => app(GitService::class)->listWorktrees($projectPath), []));
+
+        $baseBranch ??= $worktrees->firstWhere('is_primary', true)?->branch;
+
+        if ($baseBranch === null) {
+            return $projectPath;
+        }
+
+        return $worktrees->firstWhere('branch', $baseBranch)?->path ?? $projectPath;
     }
 
     public function doesAnyProjectWorkspaceWorkflowExist(string $path): bool
