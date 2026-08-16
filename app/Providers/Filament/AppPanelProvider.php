@@ -59,7 +59,7 @@ class AppPanelProvider extends PanelProvider
                 $projects->map(fn (ProjectData $project) => NavigationItem::make($project->dirName())
                     ->group(\App\Enums\NavigationGroup::PROJECTS->value)
                     ->url('/projects/'.$project->uuid)
-                    ->isActiveWhen(fn () => str(request()->path())->endsWith($project->uuid))
+                    ->isActiveWhen(fn () => str(request()->path())->contains($project->uuid))
                 )->all()
             )
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
