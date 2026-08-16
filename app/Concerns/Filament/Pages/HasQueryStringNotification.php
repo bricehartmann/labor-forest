@@ -42,6 +42,7 @@ trait HasQueryStringNotification
             ->title($success)
             ->body($this->queryStringNotificationBody())
             ->icon(Heroicon::CheckCircle)
+            ->persistent()
             ->send();
     }
 
