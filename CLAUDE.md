@@ -47,11 +47,11 @@ Steps support `if`/`unless` shell gates and per-step `env`. Progress is pushed t
 
 ### CLI tools (`lf`) and deep links
 
-`extras/bin/lf` is a bash script the user symlinks onto their PATH from `InstallCliToolsWidget` (falling back to `osascript … with administrator privileges` when the plain `ln -sf` is denied; dismissal persists as `SettingsData::$cli_tools_dismissed`). It supports `lf add-project` and `lf run <workflow>`.
+`extras/bin/lf` is a bash script the user symlinks onto their PATH from `InstallCliToolsWidget` (falling back to `osascript … with administrator privileges` when the plain `ln -sf` is denied; dismissal persists as `SettingsData::$cli_tools_dismissed`). It supports `lf add-project`, `lf run <workflow>` and `lf validate <workflow>`.
 
 The script does not talk to the app over HTTP. It writes the request to `~/.laborforest/pending.yaml` (`command`, `path` = `$PWD`, optional `workflow`) and then fires `open laborforest://…` — **the deeplink is only a wake/focus trigger**; the request travels through the file. The scheme comes from `deeplink_scheme` in `config/nativephp.php`; there is no route handler (`routes/web.php` is empty).
 
-Both drain paths call `CliToolsService::runPendingCommand()`, which returns the URL to land on and never throws — failures come back as `Dashboard::getUrl(['error' => …])`, and `Dashboard` reads that off the query string because these callers share no session with the window:
+Both drain paths call `CliToolsService::runPendingCommand()`, which returns the URL to land on and never throws — failures come back as a URL carrying the message on the query string (`Dashboard::getUrl(['error' => …])`, or the project page for a `validate-workflow` validation failure), because these callers share no session with the window. `Dashboard` and `Project` both read it via `HasQueryStringNotification` (`QueryParameter::ERROR`/`SUCCESS`/`BODY`; errors are persistent):
 
 - **warm** — `app/Listeners/RunPendingCliCommand.php` on `Native\Desktop\Events\App\OpenedFromURL`. Registered by event auto-discovery *only*; adding a manual `Event::listen` makes it fire twice (`RunPendingCliCommandTest` asserts a single binding). It navigates by window id (`WindowId::MAIN`) via `Window::all()`, because `Window::current()` asks Electron for the *focused* window and dies on `null.id`.
 - **cold** — `NativeAppServiceProvider::boot()` drains the file *before* `Window::open()`. macOS fires open-url before the PHP server is listening and NativePHP's `notifyLaravel()` swallows the failure, so the event never arrives on a cold launch.

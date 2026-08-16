@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Concerns\Filament\Pages\HasQueryStringNotification;
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Concerns\Filament\Pages\NormalizesLaunchCommands;
 use App\Data\GitStatusEntryData;
@@ -57,6 +58,7 @@ use Throwable;
 
 class Project extends Page implements HasActions, HasSchemas, HasTable
 {
+    use HasQueryStringNotification;
     use HasResultNotificationOperations;
     use InteractsWithActions;
     use InteractsWithSchemas;
@@ -99,6 +101,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
     public function mount(string $uuid): void
     {
         $this->loadProjectData($uuid);
+        $this->sendQueryStringNotification();
 
         if (session()->get(SessionKey::PROJECT_CREATED->value) !== $uuid) {
             return;

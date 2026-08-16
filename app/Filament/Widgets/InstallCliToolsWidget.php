@@ -61,7 +61,7 @@ class InstallCliToolsWidget extends Widget implements HasActions, HasSchemas
 
                 static::resultNotificationOperation(
                     callback: fn () => app(CliToolsService::class)->installCliTools($path),
-                    successTitle: 'CLI tools added',
+                    successTitle: 'CLI tools installed',
                     failureBody: fn (Throwable $th) => $th->getMessage(),
                 );
             });

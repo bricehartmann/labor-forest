@@ -10,6 +10,7 @@ use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
 use App\Enums\FileExtension;
+use App\Enums\QueryParameter;
 use App\Exceptions\InstallCliToolsFailed;
 use App\Exceptions\InvalidWorkflowFile;
 use App\Filament\Pages\Dashboard;
@@ -79,6 +80,7 @@ class CliToolsService
             return match ($pending->command) {
                 CliCommand::ADD_PROJECT => $this->addProject($pending),
                 CliCommand::RUN_WORKFLOW => $this->runWorkflow($pending),
+                CliCommand::VALIDATE_WORKFLOW => $this->validateWorkflow($pending),
             };
         } catch (Throwable $th) {
             return $this->dashboardUrl($th->getMessage());
@@ -110,12 +112,7 @@ class CliToolsService
 
         $workflow = $pending->workflow;
 
-        if (! $workflow || ! \Illuminate\Support\Facades\File::isFile(implode(DIRECTORY_SEPARATOR, [
-            $pending->path,
-            Directory::BASE->value,
-            Directory::WORKFLOWS->value,
-            $workflow.'.'.FileExtension::YAML->value,
-        ]))) {
+        if (! $workflow || ! \Illuminate\Support\Facades\File::isFile($this->workflowFilePath($pending->path, $workflow))) {
             return $this->dashboardUrl('Workflow does not exist.');
         }
 
@@ -145,12 +142,73 @@ class CliToolsService
     }
 
     /**
+     * Load the named workflow without running it, and report the page to land on.
+     *
+     * The project is resolved before the file is loaded, because a validation failure reports on the
+     * project's own page and so needs its uuid.
+     *
+     * @throws Throwable
+     */
+    private function validateWorkflow(PendingCliCommandData $pending): string
+    {
+        if (! \Illuminate\Support\Facades\File::isDirectory($pending->path)) {
+            return $this->dashboardUrl('Path does not exist.');
+        }
+
+        $workflow = $pending->workflow;
+
+        if (! $workflow || ! \Illuminate\Support\Facades\File::isFile($this->workflowFilePath($pending->path, $workflow))) {
+            return $this->dashboardUrl('Workflow does not exist.');
+        }
+
+        $workspaceData = app(ProjectsService::class)->loadProjectWorkspace($pending->path);
+        $projectData = app(ProjectsService::class)->loadProjectFromWorkspace($workspaceData->path);
+
+        if (! $projectData) {
+            return $this->dashboardUrl('Project does not exist.');
+        }
+
+        $workflowPath = $this->workflowFilePath($workspaceData->path, $workflow);
+
+        try {
+            app(WorkflowService::class)->loadWorkflow($workflowPath);
+        } catch (InvalidWorkflowFile $e) {
+            return Project::getUrl([
+                'uuid' => $projectData->uuid,
+                QueryParameter::ERROR->value => "Workflow [{$workflow}] is invalid",
+                QueryParameter::BODY->value => implode("\n", [
+                    $e->path,
+                    ...array_map(fn (string $problem): string => '• '.$problem, $e->problems),
+                ]),
+            ]);
+        }
+
+        return Project::getUrl([
+            'uuid' => $projectData->uuid,
+            QueryParameter::SUCCESS->value => "Workflow [{$workflow}] is valid.",
+        ]);
+    }
+
+    /**
+     * The path of the file defining a named workflow of the workspace rooted at $path.
+     */
+    private function workflowFilePath(string $path, string $workflow): string
+    {
+        return implode(DIRECTORY_SEPARATOR, [
+            $path,
+            Directory::BASE->value,
+            Directory::WORKFLOWS->value,
+            $workflow.'.'.FileExtension::YAML->value,
+        ]);
+    }
+
+    /**
      * The dashboard reads the message off the query string rather than the session, because the
      * callers run outside the window's own request and share no session with it.
      */
     private function dashboardUrl(string $error): string
     {
-        return Dashboard::getUrl(['error' => $error]);
+        return Dashboard::getUrl([QueryParameter::ERROR->value => $error]);
     }
 
     /**

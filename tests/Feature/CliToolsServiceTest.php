@@ -274,6 +274,116 @@ describe('run-workflow', function () {
     });
 });
 
+describe('validate-workflow', function () {
+    it('loads the workflow and returns the project page', function () {
+        cliToolsWritePendingValidate($this->workspacePath, 'up');
+        cliToolsMockProjectsService($this->workspacePath, componentProjectData($this->uuid, '/tmp/repo'));
+        cliToolsExpectNothingRun();
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadWorkflow')
+                ->once()
+                ->with($this->workflowPath)
+                ->andReturn(componentWorkflowData([componentStepData()]));
+
+            $mock->shouldNotReceive('loadSteps');
+            $mock->shouldNotReceive('dispatchWorkflow');
+        });
+
+        expect(cliToolsRun())->toBe(Project::getUrl([
+            'uuid' => $this->uuid,
+            'success' => 'Workflow [up] is valid.',
+        ]));
+    });
+
+    it('resolves the workflow file inside the workspace', function () {
+        cliToolsWritePendingValidate($this->workspacePath, 'up');
+        cliToolsMockProjectsService($this->workspacePath, componentProjectData($this->uuid, '/tmp/repo'));
+        cliToolsExpectNothingRun();
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadWorkflow')->andReturn(componentWorkflowData([componentStepData()]));
+        });
+
+        cliToolsRun();
+
+        expect($this->checkedFilePaths)->toBe([$this->workflowPath]);
+    });
+
+    it('reports every problem of an invalid workflow on the project page', function () {
+        cliToolsWritePendingValidate($this->workspacePath, 'up');
+        cliToolsMockProjectsService($this->workspacePath, componentProjectData($this->uuid, '/tmp/repo'));
+        cliToolsExpectNothingRun();
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadWorkflow')
+                ->once()
+                ->andThrow(InvalidWorkflowFile::withProblems($this->workflowPath, [
+                    'The steps field is required.',
+                    'The selected require status is invalid.',
+                ]));
+
+            $mock->shouldNotReceive('dispatchWorkflow');
+        });
+
+        expect(cliToolsRun())->toBe(Project::getUrl([
+            'uuid' => $this->uuid,
+            'error' => 'Workflow [up] is invalid',
+            'body' => implode("\n", [
+                $this->workflowPath,
+                '• The steps field is required.',
+                '• The selected require status is invalid.',
+            ]),
+        ]));
+    });
+
+    it('returns the dashboard when the path is not a directory', function () {
+        cliToolsWritePendingValidate('/tmp/nope', 'up');
+        cliToolsExpectNoValidation();
+
+        expect(cliToolsRun())->toBe(cliToolsDashboardUrl('Path does not exist.'));
+    });
+
+    it('returns the dashboard when no workflow is given', function () {
+        cliToolsWritePending(['command' => 'validate-workflow', 'path' => $this->workspacePath]);
+        cliToolsExpectNoValidation();
+
+        expect(cliToolsRun())->toBe(cliToolsDashboardUrl('Workflow does not exist.'));
+    });
+
+    it('returns the dashboard when the workflow file does not exist', function () {
+        cliToolsWritePendingValidate($this->workspacePath, 'down');
+        cliToolsExpectNoValidation();
+
+        expect(cliToolsRun())->toBe(cliToolsDashboardUrl('Workflow does not exist.'))
+            ->and($this->checkedFilePaths)->toBe(['/tmp/repo-feature/.laborforest/workflows/down.yaml']);
+    });
+
+    it('reports the failure when the workspace is not found', function () {
+        cliToolsWritePendingValidate($this->workspacePath, 'up');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjectWorkspace')
+                ->once()
+                ->andThrow(new WorkspaceNotFound($this->workspacePath));
+            $mock->shouldNotReceive('loadProjectFromWorkspace');
+        });
+
+        cliToolsExpectNoValidation();
+
+        expect(cliToolsRun())
+            ->toBe(cliToolsDashboardUrl("Workspace at path '{$this->workspacePath}' not found."));
+    });
+
+    it('reports the failure when the workspace belongs to no registered project', function () {
+        cliToolsWritePendingValidate($this->workspacePath, 'up');
+        cliToolsMockProjectsService($this->workspacePath, null);
+        cliToolsExpectNoValidation();
+
+        expect(cliToolsRun())->toBe(cliToolsDashboardUrl('Project does not exist.'));
+    });
+});
+
 describe('the pending file', function () {
     it('returns null when there is no pending file', function () {
         $this->mock(ProjectsService::class, function (MockInterface $mock) {
@@ -372,6 +482,14 @@ function cliToolsWritePendingWorkflow(string $path, string $workflow): void
 }
 
 /**
+ * A pending validate-workflow request.
+ */
+function cliToolsWritePendingValidate(string $path, string $workflow): void
+{
+    cliToolsWritePending(['command' => 'validate-workflow', 'path' => $path, 'workflow' => $workflow]);
+}
+
+/**
  * The page the pending request resolves to, if any.
  */
 function cliToolsRun(): ?string
@@ -419,6 +537,29 @@ function cliToolsMockProjectsService(string $workspacePath, ?ProjectData $projec
 function cliToolsExpectNoDispatch(): void
 {
     mock(WorkflowService::class, function (MockInterface $mock) {
+        $mock->shouldNotReceive('dispatchWorkflow');
+    });
+}
+
+/**
+ * Assert validating a workflow neither runs it nor needs the settings its runs are timed by.
+ */
+function cliToolsExpectNothingRun(): void
+{
+    mock(SettingsService::class, function (MockInterface $mock) {
+        $mock->shouldNotReceive('loadSettings');
+    });
+}
+
+/**
+ * Assert the workflow is neither loaded nor run.
+ */
+function cliToolsExpectNoValidation(): void
+{
+    cliToolsExpectNothingRun();
+
+    mock(WorkflowService::class, function (MockInterface $mock) {
+        $mock->shouldNotReceive('loadWorkflow');
         $mock->shouldNotReceive('dispatchWorkflow');
     });
 }

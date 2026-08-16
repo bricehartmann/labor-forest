@@ -22,6 +22,7 @@ use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
@@ -70,6 +71,63 @@ describe('mount', function () {
         Livewire::test(Project::class, ['uuid' => $this->uuid])
             ->assertOk()
             ->assertSet('loadedInvalidMessage', "Project with UUID '{$this->uuid}' not found.");
+    });
+
+    it('shows a query string success as a transient notification', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::withQueryParams(['success' => 'Workflow [up] is valid.'])
+            ->test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertNotified(
+                Notification::make()
+                    ->success()
+                    ->title('Workflow [up] is valid.')
+                    ->icon(Heroicon::CheckCircle)
+            );
+    });
+
+    /**
+     * The notification must be sent above mount()'s PROJECT_CREATED early return, which this covers by
+     * leaving the session key unset.
+     */
+    it('shows a query string error as a persistent notification listing every problem', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::withQueryParams([
+            'error' => 'Workflow [up] is invalid',
+            'body' => "{$this->workspacePath}/.laborforest/workflows/up.yaml\n• The steps field is required.",
+        ])
+            ->test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertNotified(
+                Notification::make()
+                    ->danger()
+                    ->title('Workflow [up] is invalid')
+                    ->body(new HtmlString("{$this->workspacePath}/.laborforest/workflows/up.yaml<br />\n• The steps field is required."))
+                    ->icon(Heroicon::XCircle)
+                    ->persistent()
+            );
+    });
+
+    it('shows nothing when no notification is on the query string', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertOk()
+            ->assertNotNotified();
     });
 });
 

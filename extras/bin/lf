@@ -35,8 +35,24 @@ usage() {
 
 Usage:  lf add-project
         lf run <workflow>
+        lf validate <workflow>
         lf --help
 EOF
+}
+
+# Exit unless the named workflow file exists in the current directory's workspace.
+require_workflow_file() {
+    local workflow="$1"
+
+    if [[ -z "$workflow" ]]; then
+        usage
+        exit 0
+    fi
+
+    if [[ ! -f ".laborforest/workflows/${workflow}.yaml" ]]; then
+        printf 'File not found: .laborforest/workflows/%s.yaml\n' "$workflow" >&2
+        exit 1
+    fi
 }
 
 add_project() {
@@ -50,15 +66,7 @@ add_project() {
 run_workflow() {
     local workflow="$1"
 
-    if [[ -z "$workflow" ]]; then
-        usage
-        exit 0
-    fi
-
-    if [[ ! -f ".laborforest/workflows/${workflow}.yaml" ]]; then
-        printf "File not found: .laborforest/workflows/${workflow}.yaml\n" >&2
-        exit 1
-    fi
+    require_workflow_file "$workflow"
 
     echo "Running workflow: ${workflow}"
 
@@ -67,9 +75,22 @@ run_workflow() {
     open "laborforest://run-workflow"
 }
 
+validate_workflow() {
+    local workflow="$1"
+
+    require_workflow_file "$workflow"
+
+    echo "Validating workflow: ${workflow}"
+
+    write_pending "validate-workflow" "$workflow"
+
+    open "laborforest://validate-workflow"
+}
+
 case "${1-}" in
     add-project) add_project ;;
     run) run_workflow "${2-}" ;;
+    validate) validate_workflow "${2-}" ;;
     --help|'') usage ;;
     *) printf 'Unknown command; see `lf --help`\n' >&2; exit 1 ;;
 esac
