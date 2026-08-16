@@ -23,3 +23,9 @@ The `Install CLI tools` panel also has a `Dismiss` button. Dismissing hides the 
 ## Reading the Docs
 
 Clicking `Read the Docs` opens the LaborForest documentation on GitHub in your default web browser.
+
+---
+
+| Previous                        | Next                    |
+|---------------------------------|-------------------------|
+| [Introduction](introduction.md) | [Settings](settings.md) |

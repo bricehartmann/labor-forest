@@ -59,3 +59,9 @@ A command containing a variable LaborForest does not recognize is rejected when 
 Variables prefixed with `ENV_` are special and denote loading a value from the Workspace's `.env` file, so `{{ ENV_FOO_BAR }}` loads the value stored under the key `FOO_BAR`. The file is read from the Workspace directory, not from the project's primary directory, so each Workspace resolves its own values.
 
 The key must be uppercase and may contain digits and underscores after the first character. A key that is well formed but missing from the Workspace's `.env` file is not caught when you save. It fails when the command runs, with an error naming the key and the file it looked in.
+
+---
+
+| Previous                  | Next                                                |
+|---------------------------|-----------------------------------------------------|
+| [Dashboard](dashboard.md) | [Projects & Workspaces](projects-and-workspaces.md) |

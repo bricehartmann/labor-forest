@@ -100,3 +100,9 @@ You can choose to remove the Project's existing worktrees, which excludes the pr
 Removing a Project does not remove the `/.laborforest/` entry from `.git/info/exclude` if you added one. Re-adding the same project later keeps that local exclusion.
 
 ![LaborForest - Remove Project](images/remove-project.png)
+
+---
+
+| Previous                | Next                      |
+|-------------------------|---------------------------|
+| [Settings](settings.md) | [Workflows](workflows.md) |

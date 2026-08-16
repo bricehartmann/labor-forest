@@ -21,3 +21,9 @@ Each new worktree usually needs setup and teardown work before it is usable. Tha
 LaborForest couples a branch to a worktree and calls that combination a `Workspace`. It then runs a sequence of steps against a `Workspace` to set it up, tear it down, or modify it. LaborForest calls a collection of these steps a `Workflow`.
 
 A `Workflow` is a YAML file you write yourself, stored inside the workspace it runs against. Steps run sequentially on your local machine, in the workspace directory, and the app reports each step's output as it runs.
+
+---
+
+| Previous | Next                      |
+|----------|---------------------------|
+|          | [Dashboard](dashboard.md) |

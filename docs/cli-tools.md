@@ -30,3 +30,9 @@ When a command fails inside the application, the app opens on a page carrying th
 ### Cold starts
 
 LaborForest does not need to be running in order to run the above commands. If the application is not already running, it is started before your command is processed.
+
+---
+
+| Previous                                        | Next |
+|-------------------------------------------------|------|
+| [Example with Laravel](example-with-laravel.md) |      |

@@ -134,3 +134,9 @@ steps:
     type: shell
     run: 'herd unlink --no-interaction {{ WORKSPACE_SLUG_KEBAB }}'
 ```
+
+---
+
+| Previous                  | Next                      |
+|---------------------------|---------------------------|
+| [Worfklows](workflows.md) | [CLI tools](cli-tools.md) |

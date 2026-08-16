@@ -149,3 +149,9 @@ Nested workflows do not evaluate the `require_status` attribute. If a nested Wor
 A nested Workflow runs inline as part of the parent run, and it always runs all of its own steps regardless of which steps you selected for the parent. If it fails, the parent stops at that step and fails too. The step links to the nested run's own log.
 
 A Workflow cannot appear twice in the same chain. If it does, the step fails immediately and reports the chain that caused it.
+
+---
+
+| Previous                                             | Next                                             |
+|------------------------------------------------------|--------------------------------------------------|
+| [Projects & Workspaces](projects-and-workspaces.md)  | [Example with Laravel](example-with-laravel.md)  |
