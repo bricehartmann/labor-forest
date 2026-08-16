@@ -6,6 +6,20 @@
 - Workflows are very loosely inspired by GitHub Actions
 - Example Workflows are included: `Bare`, `Laravel`, and `JavaScript`
 
+## Reviewing workflow logs
+- The `Logs` table row action button links to a screen that lists all previous and current Workflow runs
+- Workflow run logs can be removed by selecting the row for the Workflow run(s) and clicking the red `Delete` button above
+
+![LaborForest - Workflow Run Logs](images/workflow-run-logs.png)
+
+- Viewing a specific Workflow run displays information and console output for each step
+
+![LaborForest - Workflow Run In Progress](images/workflow-run-in-progress.png)
+
+- The displayed information updates in realtime without needing to refresh
+
+![LaborForest - Workflow Run Success](images/workflow-run-success.png)
+
 ## Implementing workflows
 - Workflows are managed manually through your YAML editor of choice
 - Workflow file names should be `kebab-case` and end in `.yaml`
