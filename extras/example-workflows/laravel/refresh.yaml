@@ -6,6 +6,19 @@ steps:
   - name: 'Run fresh migrations'
     type: shell
     run: 'php artisan -vvv migrate:fresh'
+  - name: 'Empty S3 bucket'
+    type: shell
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm "s3://{{ ENV_AWS_BUCKET }}/" --recursive --include="*"'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Clear the default queue'
+    type: shell
+    run: 'php artisan queue:clear'
+  - name: 'Wipe logs'
+    type: shell
+    run: 'truncate -s 0 storage/logs/laravel.log'
   - name: 'Run database seeder'
     type: shell
     run: 'php artisan -vvv db:seed'
