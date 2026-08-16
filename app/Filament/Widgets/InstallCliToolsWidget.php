@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\File;
 use Native\Desktop\Dialog;
 use Throwable;
 
-class AddCliToolsWidget extends Widget implements HasActions, HasSchemas
+class InstallCliToolsWidget extends Widget implements HasActions, HasSchemas
 {
     use HasResultNotificationOperations;
     use InteractsWithActions;
@@ -47,10 +47,10 @@ class AddCliToolsWidget extends Widget implements HasActions, HasSchemas
             });
     }
 
-    public function addCliToolsAction(): Action
+    public function installCliToolsAction(): Action
     {
-        return Action::make('addCliTools')
-            ->label('Add cli tools')
+        return Action::make('installCliTools')
+            ->label('Install CLI tools')
             ->color('primary')
             ->action(function () {
                 $path = $this->selectCliToolsPath();
@@ -60,7 +60,7 @@ class AddCliToolsWidget extends Widget implements HasActions, HasSchemas
                 }
 
                 static::resultNotificationOperation(
-                    callback: fn () => app(CliToolsService::class)->addCliTools($path),
+                    callback: fn () => app(CliToolsService::class)->installCliTools($path),
                     successTitle: 'CLI tools added',
                     failureBody: fn (Throwable $th) => $th->getMessage(),
                 );

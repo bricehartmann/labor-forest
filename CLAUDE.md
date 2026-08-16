@@ -47,7 +47,7 @@ Steps support `if`/`unless` shell gates and per-step `env`. Progress is pushed t
 
 ### CLI tools (`lf`) and deep links
 
-`extras/bin/lf` is a bash script the user symlinks onto their PATH from `AddCliToolsWidget` (falling back to `osascript … with administrator privileges` when the plain `ln -sf` is denied; dismissal persists as `SettingsData::$cli_tools_dismissed`). It supports `lf add-project` and `lf run <workflow>`.
+`extras/bin/lf` is a bash script the user symlinks onto their PATH from `InstallCliToolsWidget` (falling back to `osascript … with administrator privileges` when the plain `ln -sf` is denied; dismissal persists as `SettingsData::$cli_tools_dismissed`). It supports `lf add-project` and `lf run <workflow>`.
 
 The script does not talk to the app over HTTP. It writes the request to `~/.laborforest/pending.yaml` (`command`, `path` = `$PWD`, optional `workflow`) and then fires `open laborforest://…` — **the deeplink is only a wake/focus trigger**; the request travels through the file. The scheme comes from `deeplink_scheme` in `config/nativephp.php`; there is no route handler (`routes/web.php` is empty).
 

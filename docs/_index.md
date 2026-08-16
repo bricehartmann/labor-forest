@@ -5,3 +5,4 @@
 - [Workspaces](workspaces.md)
 - [Workflows](workflows.md)
 - [Example with Laravel](example-with-laravel.md)
+- [CLI tools](cli-tools.md)

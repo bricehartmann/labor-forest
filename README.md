@@ -10,6 +10,7 @@ Please read the documentation below:
 - [Workspaces](docs/workspaces.md)
 - [Workflows](docs/workflows.md)
 - [Example with Laravel](docs/example-with-laravel.md)
+- [CLI tools](docs/cli-tools.md)
 
 If you have questions, you can [open an issue](https://github.com/bricehartmann/labor-forest/issues/new).
 

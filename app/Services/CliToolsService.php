@@ -10,7 +10,7 @@ use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
 use App\Enums\FileExtension;
-use App\Exceptions\AddCliToolsFailed;
+use App\Exceptions\InstallCliToolsFailed;
 use App\Exceptions\InvalidWorkflowFile;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\Project;
@@ -26,7 +26,7 @@ class CliToolsService
 {
     use ManagesFiles;
 
-    public function addCliTools(string $path): void
+    public function installCliTools(string $path): void
     {
         $cliToolsPath = Storage::disk(Disk::EXTRAS->value)->path(implode(DIRECTORY_SEPARATOR, [
             Directory::BIN->value,
@@ -49,14 +49,14 @@ class CliToolsService
         }
 
         $appleScript = sprintf(
-            'do shell script "%s" with administrator privileges with prompt "LaborForest wants to add CLI tools."',
+            'do shell script "%s" with administrator privileges with prompt "LaborForest wants to install CLI tools."',
             str_replace('"', '\"', $shellCmd)
         );
 
         $result = Process::run(['osascript', '-e', $appleScript]);
 
         if (! $result->successful()) {
-            throw new AddCliToolsFailed($path);
+            throw new InstallCliToolsFailed($path);
         }
     }
 
