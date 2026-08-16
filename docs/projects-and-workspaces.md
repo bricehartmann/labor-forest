@@ -1,4 +1,4 @@
-# Projects
+# Projects & Workspaces
 
 ## Overview
 - Every `Project` LaborForest is aware of will appear in the menu on the left
@@ -60,3 +60,8 @@
 ![LaborForest - Remove Workspace](images/remove-workspace.png)
 
 ## Removing a project
+- You can remove a Project using the red button near the top
+- When removing a Project, you have the option to force-remove existing worktrees (not including the primary one) and the option to remove the `.laborforest` directory from the primary worktree
+    - Removing the `.laborforest` directory may result in a dirty git status in your main worktree
+
+![LaborForest - Remove Project](images/remove-project.png)

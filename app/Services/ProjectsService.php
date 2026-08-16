@@ -54,11 +54,20 @@ class ProjectsService
             ->values();
     }
 
-    public function removeProject(string $uuid, bool $removeDir = false): void
+    /**
+     * @throws GitOperationFailed
+     * @throws InvalidProjectsFile
+     */
+    public function removeProject(string $uuid, bool $removeDir = false, bool $removeWorktrees = false): void
     {
         $this->ensureBaseDirectoryExists();
         $projects = $this->loadProjects();
         $removedProject = $projects->firstWhere('uuid', $uuid);
+
+        if ($removeWorktrees && $removedProject instanceof ProjectData) {
+            app(GitService::class)->removeLinkedWorktrees($removedProject->path, force: true);
+        }
+
         $remainingProjects = $projects->reject(fn (ProjectData $projectData) => $projectData->uuid === $uuid)->values();
         $this->putBaseFile(File::PROJECTS->value, Yaml::dump($remainingProjects->toArray(), inline: 10));
 

@@ -219,6 +219,62 @@ describe('removeProject', function () {
         expect($this->deletedDirectories)->toBe([])
             ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1);
     });
+
+    it('force removes every linked worktree when asked', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->process->responses = [
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain($this->repo, 'aaa111', 'main'),
+                worktreePorcelain($this->worktree, 'bbb222', 'feature'),
+            ])],
+        ];
+
+        $this->projects->removeProject($this->uuid, false, true);
+
+        expect($this->process->commands)->toBe([
+            ['git worktree list --porcelain', $this->repo],
+            ['git worktree remove --force '.$this->worktree, $this->worktree],
+        ])
+            ->and(Yaml::parse($this->disk->get($this->path)))->toBe([]);
+    });
+
+    it('runs no git when the worktree flag is off', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->directories = [$this->repo, $this->repo.'/.laborforest'];
+
+        $this->projects->removeProject($this->uuid, true);
+
+        expect($this->process->commands)->toBe([])
+            ->and($this->deletedDirectories)->toBe([$this->repo.'/.laborforest']);
+    });
+
+    it('runs no git when the uuid is unknown', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->projects->removeProject(secondUuid(), false, true);
+
+        expect($this->process->commands)->toBe([]);
+    });
+
+    it('keeps the project registered when a worktree removal fails', function () {
+        $this->disk->put($this->path, projectsFile([projectEntry($this->uuid, $this->repo, 200)]));
+
+        $this->directories = [$this->repo, $this->repo.'/.laborforest'];
+        $this->process->responses = [
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreePorcelain($this->repo, 'aaa111', 'main'),
+                worktreePorcelain($this->worktree, 'bbb222', 'feature'),
+            ])],
+            ['ok' => false, 'err' => 'fatal: contains modified or untracked files'],
+        ];
+
+        expect(fn () => $this->projects->removeProject($this->uuid, true, true))
+            ->toThrow(GitOperationFailed::class, 'Failed to remove worktree (forced): fatal: contains modified or untracked files')
+            ->and(Yaml::parse($this->disk->get($this->path)))->toHaveCount(1)
+            ->and($this->deletedDirectories)->toBe([]);
+    });
 });
 
 describe('updateProject', function () {

@@ -249,6 +249,54 @@ describe('addWorkspace action', function () {
 });
 
 describe('remove action', function () {
+    beforeEach(function () {
+        $this->primaryWorkspace = componentWorkspaceData(
+            path: $this->projectPath,
+            isPrimary: true,
+            branch: 'main',
+        );
+    });
+
+    it('offers the force worktree checkbox when the project has a linked workspace', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace, $this->workspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->mountAction('remove')
+            ->assertSchemaComponentVisible('force_remove_worktrees');
+    });
+
+    it('hides the force worktree checkbox when only the primary workspace exists', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->mountAction('remove')
+            ->assertSchemaComponentHidden('force_remove_worktrees')
+            ->assertSchemaComponentVisible('remove_dir');
+    });
+
+    it('never forces removal while the checkbox is hidden', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->primaryWorkspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false, false);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['force_remove_worktrees' => true])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
     it('removes the project and returns to the dashboard', function () {
         $services = projectPageServices(
             project: $this->project,
@@ -256,7 +304,7 @@ describe('remove action', function () {
             workflows: $this->workflows,
         );
 
-        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false);
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false, false);
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
             ->callAction('remove', [])
@@ -271,12 +319,60 @@ describe('remove action', function () {
             workflows: $this->workflows,
         );
 
-        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, true);
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, true, false);
 
         Livewire::test(Project::class, ['uuid' => $this->uuid])
             ->callAction('remove', ['remove_dir' => true])
             ->assertNotified('Project removed')
             ->assertRedirect('/');
+    });
+
+    it('force removes the worktrees when the checkbox is ticked', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, false, true);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['force_remove_worktrees' => true])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
+    it('passes both removal options when both checkboxes are ticked', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']->shouldReceive('removeProject')->once()->with($this->uuid, true, true);
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['remove_dir' => true, 'force_remove_worktrees' => true])
+            ->assertNotified('Project removed')
+            ->assertRedirect('/');
+    });
+
+    it('reports a failed worktree removal and stays on the page', function () {
+        $services = projectPageServices(
+            project: $this->project,
+            workspaces: [$this->workspace],
+            workflows: $this->workflows,
+        );
+
+        $services['projects']
+            ->shouldReceive('removeProject')
+            ->once()
+            ->andThrow(new GitOperationFailed('remove worktree (forced)', 'contains modified or untracked files'));
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->callAction('remove', ['force_remove_worktrees' => true])
+            ->assertNotified('Whoops! Something went wrong.')
+            ->assertNoRedirect();
     });
 
     it('reports a failed removal and stays on the page', function () {

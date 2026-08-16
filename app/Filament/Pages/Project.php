@@ -116,6 +116,11 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
         return ($primaryWorkspace['git_status'] ?? null) === GitStatus::DIRTY->value;
     }
 
+    protected function hasLinkedWorkspaces(): bool
+    {
+        return collect($this->workspaces)->contains(fn (array $workspace) => ! ($workspace['is_primary'] ?? false));
+    }
+
     protected function reloadData(): void
     {
         $this->loadProjectData($this->projectData->uuid);
@@ -402,13 +407,21 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
             ->modalCancelActionLabel('Cancel')
             ->modalFooterActionsAlignment(Alignment::End)
             ->schema([
+                Checkbox::make('force_remove_worktrees')
+                    ->visible(fn (): bool => $this->hasLinkedWorkspaces())
+                    ->label('Force remove all worktrees')
+                    ->helperText('Deletes every workspace directory except the primary one. Their branches are left in place.'),
                 Checkbox::make('remove_dir')
                     ->label(new HtmlString('Remove <code class="text-red-600">'.Directory::BASE->value.'</code> directory')),
             ])
             ->action(function (array $data) {
                 static::resultNotificationOperation(
                     callback: function () use ($data) {
-                        app(ProjectsService::class)->removeProject($this->projectData->uuid, $data['remove_dir'] ?? false);
+                        app(ProjectsService::class)->removeProject(
+                            $this->projectData->uuid,
+                            $data['remove_dir'] ?? false,
+                            $data['force_remove_worktrees'] ?? false,
+                        );
 
                         $this->redirect('/');
                     },

@@ -186,6 +186,77 @@ describe('removeWorktree', function () {
     });
 });
 
+describe('removeLinkedWorktrees', function () {
+    it('removes every worktree but the primary and keeps the branches', function () {
+        $this->process->responses = [['ok' => true, 'out' => implode("\n\n", [
+            worktreeRecord($this->repo, 'aaa111', 'main'),
+            worktreeRecord($this->worktree, 'bbb222', 'feature'),
+            worktreeRecord('/tmp/repo-release', 'ccc333', 'release/1.0'),
+        ])]];
+
+        $this->git->removeLinkedWorktrees($this->repo, true);
+
+        expect($this->process->commands)->toBe([
+            ['git worktree list --porcelain', $this->repo],
+            ['git worktree remove --force /tmp/repo-feature', $this->worktree],
+            ['git worktree remove --force /tmp/repo-release', '/tmp/repo-release'],
+        ]);
+    });
+
+    it('removes without forcing when force is false', function () {
+        $this->process->responses = [['ok' => true, 'out' => implode("\n\n", [
+            worktreeRecord($this->repo, 'aaa111', 'main'),
+            worktreeRecord($this->worktree, 'bbb222', 'feature'),
+        ])]];
+
+        $this->git->removeLinkedWorktrees($this->repo, false);
+
+        expect($this->process->commands[1])->toBe(['git worktree remove /tmp/repo-feature', $this->worktree]);
+    });
+
+    it('removes nothing when the repository only has a primary worktree', function () {
+        $this->process->responses = [['ok' => true, 'out' => worktreeRecord($this->repo, 'aaa111', 'main')]];
+
+        $this->git->removeLinkedWorktrees($this->repo, true);
+
+        expect($this->process->commands)->toBe([['git worktree list --porcelain', $this->repo]]);
+    });
+
+    it('removes a detached worktree that has no branch', function () {
+        $this->process->responses = [['ok' => true, 'out' => implode("\n\n", [
+            worktreeRecord($this->repo, 'aaa111', 'main'),
+            worktreeRecord('/tmp/repo-detached', 'bbb222'),
+        ])]];
+
+        $this->git->removeLinkedWorktrees($this->repo, true);
+
+        expect($this->process->commands[1])->toBe(['git worktree remove --force /tmp/repo-detached', '/tmp/repo-detached']);
+    });
+
+    it('throws without removing anything when the listing fails', function () {
+        $this->process->responses = [['ok' => false, 'err' => 'fatal: not a git repository']];
+
+        expect(fn () => $this->git->removeLinkedWorktrees($this->repo, true))
+            ->toThrow(GitOperationFailed::class, 'Failed to list worktrees: fatal: not a git repository')
+            ->and($this->process->commands)->toHaveCount(1);
+    });
+
+    it('aborts on the first failed removal and leaves the rest alone', function () {
+        $this->process->responses = [
+            ['ok' => true, 'out' => implode("\n\n", [
+                worktreeRecord($this->repo, 'aaa111', 'main'),
+                worktreeRecord($this->worktree, 'bbb222', 'feature'),
+                worktreeRecord('/tmp/repo-release', 'ccc333', 'release/1.0'),
+            ])],
+            ['ok' => false, 'err' => 'fatal: contains modified or untracked files'],
+        ];
+
+        expect(fn () => $this->git->removeLinkedWorktrees($this->repo, true))
+            ->toThrow(GitOperationFailed::class, 'Failed to remove worktree (forced): fatal: contains modified or untracked files')
+            ->and($this->process->commands)->toHaveCount(2);
+    });
+});
+
 describe('listWorktrees', function () {
     it('parses the primary and linked worktrees', function () {
         $this->process->responses = [['ok' => true, 'out' => implode("\n\n", [

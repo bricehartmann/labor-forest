@@ -92,6 +92,26 @@ class GitService
     }
 
     /**
+     * Remove every linked worktree of a repository, leaving the primary worktree and all branches
+     * in place. Aborts on the first failure, so an interrupted run leaves the repository usable.
+     *
+     * @throws GitOperationFailed
+     */
+    public function removeLinkedWorktrees(string $mainWorktreePath, bool $force): void
+    {
+        $this->listWorktrees($mainWorktreePath)
+            ->reject(fn (WorktreeData $worktreeData) => $worktreeData->is_primary)
+            ->each(fn (WorktreeData $worktreeData) => $this->removeWorktree(
+                mainWorktreePath: $mainWorktreePath,
+                worktreePath: $worktreeData->path,
+                branch: $worktreeData->branch ?? '',
+                force: $force,
+                deleteBranch: false,
+                forceDeleteBranch: false,
+            ));
+    }
+
+    /**
      * @return Collection<int, WorktreeData>
      *
      * @throws GitOperationFailed
