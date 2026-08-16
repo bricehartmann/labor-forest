@@ -12,6 +12,7 @@ use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Tests\TestCase;
 
@@ -34,6 +35,13 @@ pest()->extend(TestCase::class)
         // does nothing until something is recording, and a bare Process::fake() installs a catch-all
         // handler that would swallow everything. A test's own Process::fake() merges on top of this.
         Process::fake([])->preventStrayProcesses();
+
+        // The same guard for HTTP: an empty-array fake() starts recording without registering a
+        // stub, so a request nobody faked fails with "Attempted request to [...] without a matching
+        // fake." instead of reaching the network. AppVersionWidget mounts on the dashboard and calls
+        // the GitHub releases API, so without this every dashboard test hits api.github.com for real.
+        // A test's own Http::fake() merges on top of this.
+        Http::fake([])->preventStrayRequests();
     })
     ->in('Feature');
 

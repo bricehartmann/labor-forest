@@ -4,6 +4,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Latest Release URL
+    |--------------------------------------------------------------------------
+    |
+    | The GitHub API endpoint the dashboard checks for a newer release than the
+    | installed one. It answers with the newest published, non-prerelease tag.
+    |
+    */
+
+    'latest_release_url' => 'https://api.github.com/repos/bricehartmann/labor-forest/releases/latest',
+
+    /*
+    |--------------------------------------------------------------------------
     | Documentation URL
     |--------------------------------------------------------------------------
     |
