@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  A verbatim copy of the entitlements nativephp/desktop ships in
+  resources/electron/build/entitlements.mac.plist.
+
+  Kept here so `composer native:build:signed` can restore the defaults over a
+  previously patched vendor copy. Without it, a signed build run after an ad-hoc
+  one would silently inherit the relaxed entitlements from
+  entitlements.mac.plist. Re-sync this file when nativephp/desktop changes its
+  own copy.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+  </dict>
+</plist>

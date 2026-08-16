@@ -11,12 +11,19 @@ composer dev          # web-only dev: artisan serve + queue:listen + pail + vite
 composer test         # config:clear + full test suite
 php artisan test --compact --filter=testName   # single test
 vendor/bin/pint --dirty --format agent         # format changed PHP files
-php artisan native:build                       # package the desktop app (output: nativephp/electron/dist)
+composer native:build # package the desktop app; entitlements auto-selected (output: nativephp/electron/dist)
 composer logs:tail    # tail packaged-app log (~/Library/Application Support/laborforest-dev/storage/logs/laravel.log)
 composer logs:wipe    # truncate that log
 ```
 
-`native:build` prebuild chain (see `config/nativephp.php`): `npm run build` → `php artisan app:patch-mac-entitlements` → `php artisan optimize`.
+`native:build` prebuild chain (see `config/nativephp.php`): `npm run build` → `php artisan optimize`.
+
+macOS entitlements are patched by the composer script, not by prebuild, because a failing prebuild command only logs and lets the build continue (`HasPreAndPostProcessing::runProcess()`), while composer aborts the chain. `app:patch-mac-entitlements` overwrites NativePHP's `build/entitlements.mac.plist` — which resolves to the *vendor* copy, `vendor/nativephp/desktop/resources/electron/build/` — with one of two committed plists:
+
+- `resources/nativephp/entitlements.mac.plist` adds `com.apple.security.cs.disable-library-validation`, required because an ad-hoc signed build has no Team ID.
+- `resources/nativephp/entitlements.mac.default.plist` is a verbatim copy of NativePHP's own plist. The patch is sticky, so a release build has to write the defaults back rather than merely skip the patch — hence a second file rather than a conditional.
+
+Which one is used is inferred from `config('nativephp-internal.notarization')`: all three of `NATIVEPHP_APPLE_ID`, `NATIVEPHP_APPLE_ID_PASS` and `NATIVEPHP_APPLE_TEAM_ID` `filled()` means a Developer ID release and selects the defaults, anything less selects the ad-hoc overrides. Read through config rather than `env()`, which returns null under a cached config, and `filled()` rather than a null check, because a half-filled `.env` leaves the others as empty strings. `--adhoc` and `--default` force a profile when the credentials don't reflect the intent (combining them is an error). The credentials only prove notarization is configured, not that a signing certificate exists, so the command prints which profile it picked and why. Running `php artisan native:build` directly patches nothing and inherits whatever the vendor plist currently holds.
 
 CI (`.github/workflows/test.yaml`) runs `composer test` and `vendor/bin/pint --test` on push/PR to `main` (PHP 8.4, Node 22).
 

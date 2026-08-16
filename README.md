@@ -39,7 +39,7 @@ composer run native:dev
 ## Building for production
 Output: `nativephp/electron/dist/LaborForest-1.0.0-arm64.dmg`
 ```shell
-php artisan native:build mac arm64
+composer native:build mac arm64
 ```
 
 ## Important directories
