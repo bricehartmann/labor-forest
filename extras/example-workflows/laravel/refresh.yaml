@@ -8,7 +8,8 @@ steps:
     run: 'php artisan -vvv migrate:fresh'
   - name: 'Empty S3 bucket'
     type: shell
-    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm "s3://{{ ENV_AWS_BUCKET }}/" --recursive --include="*"'
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm s3://{{ ENV_AWS_BUCKET }} --recursive --include="*"'
     env:
       AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
       AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'

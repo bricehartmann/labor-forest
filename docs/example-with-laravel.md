@@ -14,21 +14,20 @@ The below configuration of Workflows allows a developer to:
 - easily tear down the development environment when work has concluded
 
 ### Workflow: `up`
-The goals for the Workflows are:
-- Setup (`up` Workflow)
-  - Copy the .env file from the Project's primary directory
-  - Update the .env file for:
-    - `APP_URL`
-    - `AWS_BUCKET`
-    - `DB_DATABASE`
-    - `REDIS_PREFIX`
-  - Create an S3 bucket for the environment, if none exists
-  - Create a MySQL schema for the environment, if none exists
-  - Install Composer dependencies
-  - Install NPM dependencies
-  - Build front end assets
-  - Link and secure the Laravel Herd local site
-  - Migrate and Seed the database (via the `refresh` Workflow)
+The goals for the Workflow are:
+- Copy the .env file from the Project's primary directory
+- Update the .env file for:
+  - `APP_URL`
+  - `AWS_BUCKET`
+  - `DB_DATABASE`
+  - `REDIS_PREFIX`
+- Create an S3 bucket for the environment, if none exists
+- Create a MySQL schema for the environment, if none exists
+- Install Composer dependencies
+- Install NPM dependencies
+- Build front end assets
+- Link and secure the Laravel Herd local site
+- Migrate and Seed the database (via the `refresh` Workflow)
 
 #### `.laborforest/workflows/up.yaml`
 ```yaml
@@ -62,7 +61,7 @@ steps:
     run: 'mysql -h {{ ENV_DB_HOST }} -P {{ ENV_DB_PORT }} -u {{ ENV_DB_USERNAME }} $([[ -z "{{ ENV_DB_PASSWORD }}" ]] && echo "--skip-password" || echo "-p{{ ENV_DB_PASSWORD }}") -e "CREATE DATABASE IF NOT EXISTS {{ ENV_DB_DATABASE }} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"'
   - name: 'Install Composer dependencies'
     type: shell
-    run: 'composer install --no-interaction'
+    run: 'composer install -v --ansi --no-interaction'
   - name: 'Install NPM dependencies'
     type: shell
     run: 'npm ci'
@@ -78,20 +77,75 @@ steps:
 ```
 
 ### Workflow: `refresh`
-The goals for the Workflows are:
-- Setup (`up` Workflow)
-    - Copy the .env file from the Project's primary directory
-    - Update the .env file for:
-        - `APP_URL`
-        - `AWS_BUCKET`
-        - `DB_DATABASE`
-        - `REDIS_PREFIX`
-    - Create an S3 bucket for the environment, if none exists
-    - Create a MySQL schema for the environment, if none exists
-    - Install Composer dependencies
-    - Install NPM dependencies
-    - Build front end assets
-    - Link and secure the Laravel Herd local site
-    - Migrate and Seed the database (via the `refresh` Workflow)
+The goals for the Workflow are:
+- Drop all tables and migrate the database from scratch
+- Empty the S3 bucket, if it exists
+- Clear the default queue
+- Wipe the logs
+- Run the database seeder
 
 #### `.laborforest/workflows/refresh.yaml`
+```yaml
+resource_type: workflow
+require_status: ready
+ending_status: ready
+sort_order: 1
+steps:
+  - name: 'Run fresh migrations'
+    type: shell
+    run: 'php artisan -vvv migrate:fresh'
+  - name: 'Empty S3 bucket'
+    type: shell
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm "s3://{{ ENV_AWS_BUCKET }}/" --recursive --include="*"'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Clear the default queue'
+    type: shell
+    run: 'php artisan queue:clear'
+  - name: 'Wipe logs'
+    type: shell
+    run: 'truncate -s 0 storage/logs/laravel.log'
+  - name: 'Run database seeder'
+    type: shell
+    run: 'php artisan -vvv db:seed'
+```
+
+### Workflow: `down`
+The goals for the Workflow are:
+- Empty the S3 bucket, if it exists
+- Delete the S3 bucket, if it exists
+- Drop the MySQL schema, if it exists
+- Remove the Laravel Herd local site
+
+#### `.laborforest/workflows/down.yaml`
+```yaml
+resource_type: workflow
+require_status: ready
+ending_status: suspended
+sort_order: 100
+steps:
+  - name: 'Empty S3 bucket'
+    type: shell
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3 rm s3://{{ ENV_AWS_BUCKET }} --recursive --include="*"'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Delete S3 bucket'
+    type: shell
+    if: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api head-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    run: 'aws --endpoint={{ ENV_AWS_ENDPOINT }} s3api delete-bucket --bucket {{ ENV_AWS_BUCKET }}'
+    env:
+      AWS_ACCESS_KEY_ID: '{{ ENV_AWS_ACCESS_KEY_ID }}'
+      AWS_SECRET_ACCESS_KEY: '{{ ENV_AWS_SECRET_ACCESS_KEY }}'
+      AWS_DEFAULT_REGION: '{{ ENV_AWS_DEFAULT_REGION }}'
+  - name: 'Drop MySQL schema'
+    type: shell
+    run: 'mysql -h {{ ENV_DB_HOST }} -P {{ ENV_DB_PORT }} -u {{ ENV_DB_USERNAME }} $([[ -z "{{ ENV_DB_PASSWORD }}" ]] && echo "--skip-password" || echo "-p{{ ENV_DB_PASSWORD }}") -e "DROP DATABASE IF EXISTS {{ ENV_DB_DATABASE }}"'
+  - name: 'Remove Laravel Herd site'
+    type: shell
+    run: 'herd unlink --no-interaction {{ WORKSPACE_SLUG_KEBAB }}'
+```

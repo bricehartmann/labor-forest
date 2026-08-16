@@ -28,7 +28,7 @@ steps:
     run: 'mysql -h {{ ENV_DB_HOST }} -P {{ ENV_DB_PORT }} -u {{ ENV_DB_USERNAME }} $([[ -z "{{ ENV_DB_PASSWORD }}" ]] && echo "--skip-password" || echo "-p{{ ENV_DB_PASSWORD }}") -e "CREATE DATABASE IF NOT EXISTS {{ ENV_DB_DATABASE }} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"'
   - name: 'Install Composer dependencies'
     type: shell
-    run: 'composer install -vvv --no-interaction'
+    run: 'composer install -v --ansi --no-interaction'
   - name: 'Install NPM dependencies'
     type: shell
     run: 'npm ci'

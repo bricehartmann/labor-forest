@@ -29,6 +29,9 @@ steps:
 - To require a Workspace is within a specific status in order to be run, use `require_status`
 - To update a Workflow status after a successful run, use `ending_status`
 
+### Sort order
+- The `sort_order` attribute controls the order the Workflow appears in the `Workflows` table row action button menu.
+
 ### Types of Steps
 - There are three types of steps:
   - `shell` - runs a shell command
