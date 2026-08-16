@@ -75,6 +75,7 @@ Both drain paths call `CliToolsService::runPendingCommand()`, which returns the 
 - `ProcessEnvironmentService::sanitized()` — strips LaborForest's own env from spawned processes (`app/Enums/HostEnvKey.php`) so workspace commands don't inherit this app's `.env`
 - `LaunchService` — opens the configured IDE/browser/terminal for a workspace
 - `SettingsService` — settings.yaml load/save/sync
+- `GitHubService` — the newest published release, from `config('app.latest_release_url')`. The answer is held for `CacheKey::LATEST_RELEASE->ttl()` (15 minutes) because `AppVersionWidget` asks on every dashboard render and the unauthenticated GitHub API allows 60 calls an hour; failures escape `Cache::remember()` and are never cached. `getLatestReleaseData(bypassCache: true)` forces a fresh check. The *array* is cached, not the `GitHubReleaseData` — the cache outlives an app upgrade, and a stale serialized object of a class that has since gained a property would fail on property access, past the caller's `rescue()`
 
 Each service throws typed exceptions from `app/Exceptions/` (`GitStatusNotClean`, `InvalidWorkflowFile`, `UnresolvedVariable`, …). Magic strings live in backed enums in `app/Enums/`.
 
@@ -91,7 +92,7 @@ Each service throws typed exceptions from `app/Exceptions/` (`GitStatusNotClean`
 
 Pest 5, sqlite `:memory:`, sync queue; feature tests in `tests/Feature/`, `tests/Unit/` is empty. Read the project skills in `.claude/skills/` — `service-testing`, `livewire-testing`, `pest-testing` — before writing tests; they document the patterns in detail. The load-bearing conventions:
 
-- `tests/Pest.php` runs `Process::fake([])->preventStrayProcesses()` before every feature test, so any process a test forgot to fake fails loudly instead of reaching a real shell. Neither call works alone. A test's own `Process::fake()` merges on top.
+- `tests/Pest.php` runs `Process::fake([])->preventStrayProcesses()` before every feature test, so any process a test forgot to fake fails loudly instead of reaching a real shell. Neither call works alone. A test's own `Process::fake()` merges on top. `Http::fake([])->preventStrayRequests()` does the same for HTTP — `AppVersionWidget` mounts on the dashboard and calls the GitHub releases API, so without it every dashboard test would hit the network.
 - `RefreshDatabase` is intentionally commented out — nothing domain-level lives in the database.
 - Test doubles live in `tests/Fakes/` (`ProcessSpy`, `FakeProcessEnvironmentService`, `FakeRunPendingCliCommand`); YAML fixtures in `tests/Fixtures/`. Shared Filament/Livewire fixture builders sit in `tests/Pest.php` prefixed `component*`, because top-level test functions share one global namespace across the suite.
 - Deliberate seams are `protected` methods: `LaunchService::launchProcess()` (its `create_new_console` + faked `PendingProcess::start()` combination is fatal) and `RunPendingCliCommand::navigateTo()` (no Electron in tests). `GitService::runGit()` is private and is *not* a seam — fake the Process facade instead.

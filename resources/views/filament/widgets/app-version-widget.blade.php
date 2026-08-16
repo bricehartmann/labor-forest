@@ -6,8 +6,15 @@
         <x-slot name="description">
             Below is the currently installed application version.
         </x-slot>
-        <div class="flex justify-end text-xl">
+        <div class="flex justify-end items-center text-xl gap-4">
             {{ $appVersion }}
+            @if($this->isLatestVersion)
+                <x-filament::badge color="success" :icon="\Filament\Support\Icons\Heroicon::Check">
+                    latest version
+                </x-filament::badge>
+            @elseif($this->latestReleaseTag)
+                {{ $this->upgrade }}
+            @endif
         </div>
     </x-filament::section>
 </x-filament-widgets::widget>
