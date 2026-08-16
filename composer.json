@@ -90,6 +90,11 @@
             "@php artisan optimize:clear --ansi",
             "Composer\\Config::disableProcessTimeout",
             "npx concurrently -k -c \"#93c5fd,#c4b5fd\" \"php artisan native:run --no-interaction\" \"npm run dev\" --names=app,vite"
+        ],
+        "native:build": [
+            "@php artisan optimize:clear --ansi @no_additional_args",
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan native:build"
         ]
     },
     "extra": {
