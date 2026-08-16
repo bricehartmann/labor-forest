@@ -6,7 +6,7 @@
         <x-slot name="description">
             Click the button below to select a directory and add the CLI tools script.
         </x-slot>
-        <div class="flex justify-between">
+        <div class="flex justify-end gap-4">
             {{ $this->dismiss }}
             {{ $this->addCliTools }}
         </div>

@@ -2,6 +2,8 @@
 
 return [
 
+    'docs_url' => 'https://github.com/bricehartmann/labor-forest/tree/main/docs/_index.md',
+
     /*
     |--------------------------------------------------------------------------
     | Application Name
