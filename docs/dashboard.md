@@ -10,7 +10,7 @@ The Dashboard is the landing screen when you first open LaborForest. You can nav
 
 The current application version installed to your device is shown in widget on the dashboard. If your application version is up to date, a green badge will show denoting such. If your application version is behind, an orange button will show which links to the latest release page on GitHub. To upgrade, you must manually uninstall your current version, download the latest version, and reinstall (no automatic updates).
 
-LaborForest checks GitHub for the latest release at most once every 15 minutes and remembers the answer in between, so a release published moments ago may take that long to appear.
+LaborForest checks GitHub for the latest release at most once every 15 minutes and remembers the answer in between, so a release published moments ago may take that long to appear. Quitting and reopening LaborForest forgets the remembered answer and checks again straight away.
 
 ## Reading the documentation
 

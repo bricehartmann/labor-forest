@@ -121,6 +121,16 @@ describe('caching', function () {
         Http::assertSentCount(1);
     });
 
+    it('hands back a release object from the cache', function () {
+        Http::fake([$this->url => Http::response(githubReleasePayload())]);
+
+        $this->github->getLatestReleaseData();
+
+        expect($this->github->getLatestReleaseData())->toBeInstanceOf(GitHubReleaseData::class);
+
+        Http::assertSentCount(1);
+    });
+
     it('is still cached just before the window closes', function () {
         Http::fake([$this->url => Http::response(githubReleasePayload())]);
 
