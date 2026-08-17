@@ -12,6 +12,8 @@ The installation creates a symlink named `lf` pointing at the script inside the 
 
 LaborForest first tries to create the symlink directly. If that is denied, it retries with administrator privileges, which is when macOS prompts you for your password. Cancelling that prompt fails the installation.
 
+Once the tools are installed, the same button reads `Reinstall CLI tools`. Use it to install into a different directory, or to recreate a symlink broken by moving LaborForest. Reinstalling does not remove an earlier symlink, so an install into a new directory leaves the old `lf` behind.
+
 There is no uninstall command. To remove the CLI tools, delete the symlink yourself.
 
 ## Using the CLI tools

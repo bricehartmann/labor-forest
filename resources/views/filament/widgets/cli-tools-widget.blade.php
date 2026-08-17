@@ -7,7 +7,6 @@
             Click the button below to select a directory and install the CLI tools script.
         </x-slot>
         <div class="flex justify-end gap-4">
-            {{ $this->dismiss }}
             {{ $this->installCliTools }}
         </div>
     </x-filament::section>

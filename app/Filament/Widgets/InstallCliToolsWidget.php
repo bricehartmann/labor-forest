@@ -3,7 +3,6 @@
 namespace App\Filament\Widgets;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
-use App\Filament\Pages\Dashboard;
 use App\Services\CliToolsService;
 use App\Services\SettingsService;
 use Filament\Actions\Action;
@@ -26,31 +25,10 @@ class InstallCliToolsWidget extends Widget implements HasActions, HasSchemas
 
     protected string $view = 'filament.widgets.cli-tools-widget';
 
-    public static function canView(): bool
-    {
-        return ! rescue(fn () => app(SettingsService::class)->loadSettings()->cli_tools_dismissed, true);
-    }
-
-    public function dismissAction(): Action
-    {
-        return Action::make('dismiss')
-            ->label('Dismiss')
-            ->color('gray')
-            ->action(function () {
-                static::resultNotificationOperation(
-                    callback: fn () => app(CliToolsService::class)->dismissCliToolsWidget(),
-                    successTitle: null,
-                    failureBody: fn (Throwable $th) => $th->getMessage(),
-                );
-
-                $this->redirect(Dashboard::getUrl(), navigate: true);
-            });
-    }
-
     public function installCliToolsAction(): Action
     {
         return Action::make('installCliTools')
-            ->label('Install CLI tools')
+            ->label(fn (): string => $this->cliToolsInstalled() ? 'Reinstall CLI tools' : 'Install CLI tools')
             ->color('primary')
             ->action(function () {
                 $path = $this->selectCliToolsPath();
@@ -65,6 +43,16 @@ class InstallCliToolsWidget extends Widget implements HasActions, HasSchemas
                     failureBody: fn (Throwable $th) => $th->getMessage(),
                 );
             });
+    }
+
+    /**
+     * Whether the tools have been installed before, which decides the button's label.
+     *
+     * Fails closed to `Install CLI tools`, so an unreadable settings file cannot break the render.
+     */
+    protected function cliToolsInstalled(): bool
+    {
+        return rescue(fn () => app(SettingsService::class)->loadSettings()->cli_tools_installed, false);
     }
 
     /**
