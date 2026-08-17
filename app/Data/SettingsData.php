@@ -9,7 +9,7 @@ class SettingsData extends Data
 {
     public function __construct(
         public bool $dark_mode = true,
-        public bool $cli_tools_dismissed = false,
+        public bool $cli_tools_installed = false,
         public int $workflow_step_timeout_seconds = 600,
         public ?string $command_launch_ide = null,
         public ?string $command_launch_browser = null,
@@ -32,7 +32,7 @@ class SettingsData extends Data
                 'required',
                 'boolean',
             ],
-            'cli_tools_dismissed' => [
+            'cli_tools_installed' => [
                 'required',
                 'boolean',
             ],

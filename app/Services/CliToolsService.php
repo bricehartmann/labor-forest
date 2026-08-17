@@ -27,6 +27,11 @@ class CliToolsService
 {
     use ManagesFiles;
 
+    /**
+     * Symlink the `lf` script into $path, and record that the tools have been installed.
+     *
+     * @throws InstallCliToolsFailed when neither the plain nor the privileged symlink succeeds
+     */
     public function installCliTools(string $path): void
     {
         $cliToolsPath = Storage::disk(Disk::EXTRAS->value)->path(implode(DIRECTORY_SEPARATOR, [
@@ -45,20 +50,20 @@ class CliToolsService
 
         $process = Process::run($shellCmd);
 
-        if ($process->successful()) {
-            return;
+        if (! $process->successful()) {
+            $appleScript = sprintf(
+                'do shell script "%s" with administrator privileges with prompt "LaborForest wants to install CLI tools."',
+                str_replace('"', '\"', $shellCmd)
+            );
+
+            $result = Process::run(['osascript', '-e', $appleScript]);
+
+            if (! $result->successful()) {
+                throw new InstallCliToolsFailed($path);
+            }
         }
 
-        $appleScript = sprintf(
-            'do shell script "%s" with administrator privileges with prompt "LaborForest wants to install CLI tools."',
-            str_replace('"', '\"', $shellCmd)
-        );
-
-        $result = Process::run(['osascript', '-e', $appleScript]);
-
-        if (! $result->successful()) {
-            throw new InstallCliToolsFailed($path);
-        }
+        $this->markCliToolsInstalled();
     }
 
     /**
@@ -259,11 +264,14 @@ class CliToolsService
         }
     }
 
-    public function dismissCliToolsWidget(): void
+    /**
+     * Record the install, which is what turns the widget's button into `Reinstall CLI tools`.
+     */
+    private function markCliToolsInstalled(): void
     {
         $settingsService = app(SettingsService::class);
         $settingsData = $settingsService->loadSettings();
-        $settingsData->cli_tools_dismissed = true;
+        $settingsData->cli_tools_installed = true;
         $settingsService->saveSettings($settingsData);
     }
 }

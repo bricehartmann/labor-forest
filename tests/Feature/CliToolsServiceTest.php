@@ -3,6 +3,7 @@
 use App\Data\ProjectData;
 use App\Data\SettingsData;
 use App\Enums\WorkspaceStatus;
+use App\Exceptions\InstallCliToolsFailed;
 use App\Exceptions\InvalidSettingsFile;
 use App\Exceptions\InvalidWorkflowFile;
 use App\Exceptions\ProjectDirectoryNotGitRepository;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Mockery\MockInterface;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Fakes\ProcessSpy;
 
 use function Pest\Laravel\mock;
 
@@ -63,6 +65,68 @@ beforeEach(function () {
 
             return in_array($path, $this->existingPaths);
         });
+});
+
+describe('installCliTools', function () {
+    beforeEach(function () {
+        Storage::fake('extras');
+
+        $this->process = ProcessSpy::install();
+
+        $this->installPath = '/tmp/bin';
+        $this->scriptPath = Storage::disk('extras')->path('bin/lf');
+        $this->symlinkCommand = sprintf(
+            "ln -sf '%s' '/tmp/bin/lf' && chmod +x '/tmp/bin/lf'",
+            $this->scriptPath,
+        );
+    });
+
+    it('symlinks the script and records the install', function () {
+        app(CliToolsService::class)->installCliTools($this->installPath);
+
+        expect($this->process->commands)->toBe([[$this->symlinkCommand, null]])
+            ->and(cliToolsInstalledSetting())->toBeTrue();
+    });
+
+    it('retries with administrator privileges when the plain symlink is denied', function () {
+        $this->process->responses = [['ok' => false]];
+
+        app(CliToolsService::class)->installCliTools($this->installPath);
+
+        [$command] = $this->process->commands[1];
+
+        expect($this->process->commands)->toHaveCount(2)
+            ->and($command[0])->toBe('osascript')
+            ->and($command[1])->toBe('-e')
+            ->and($command[2])
+            ->toContain('with administrator privileges')
+            ->toContain($this->scriptPath)
+            ->and(cliToolsInstalledSetting())->toBeTrue();
+    });
+
+    it('throws and records nothing when the privileged symlink also fails', function () {
+        $this->process->responses = [['ok' => false], ['ok' => false]];
+
+        expect(fn () => app(CliToolsService::class)->installCliTools($this->installPath))
+            ->toThrow(InstallCliToolsFailed::class, "Failed to install CLI tools to: '/tmp/bin'")
+            ->and($this->process->commands)->toHaveCount(2)
+            ->and(Storage::disk('user_home')->exists('.laborforest/settings.yaml'))->toBeFalse();
+    });
+
+    it('leaves the other settings alone', function () {
+        Storage::disk('user_home')->put('.laborforest/settings.yaml', Yaml::dump([
+            'dark_mode' => false,
+            'workflow_step_timeout_seconds' => 45,
+        ]));
+
+        app(CliToolsService::class)->installCliTools($this->installPath);
+
+        $written = Yaml::parse(Storage::disk('user_home')->get('.laborforest/settings.yaml'));
+
+        expect($written['cli_tools_installed'])->toBeTrue()
+            ->and($written['dark_mode'])->toBeFalse()
+            ->and($written['workflow_step_timeout_seconds'])->toBe(45);
+    });
 });
 
 describe('add-project', function () {
@@ -462,6 +526,14 @@ describe('the pending file', function () {
             ->and(cliToolsRun())->toBeNull();
     });
 });
+
+/**
+ * Whether the settings file records the CLI tools as installed.
+ */
+function cliToolsInstalledSetting(): bool
+{
+    return Yaml::parse(Storage::disk('user_home')->get('.laborforest/settings.yaml'))['cli_tools_installed'];
+}
 
 /**
  * Leave a request behind exactly as the `lf` script does.
