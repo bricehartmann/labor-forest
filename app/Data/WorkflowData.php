@@ -2,8 +2,10 @@
 
 namespace App\Data;
 
+use App\Contracts\McpResource;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
+use Filament\Schemas\Components\Wizard\Step;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Spatie\LaravelData\Attributes\WithCast;
@@ -12,7 +14,7 @@ use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Support\Transformation\TransformationContext;
 use Spatie\LaravelData\Support\Transformation\TransformationContextFactory;
 
-class WorkflowData extends Data
+class WorkflowData extends Data implements McpResource
 {
     public function __construct(
         #[WithCast(EnumCast::class)]
@@ -51,6 +53,14 @@ class WorkflowData extends Data
                     WorkspaceStatus::SUSPENDED->value,
                 ]),
             ],
+        ];
+    }
+
+    public function toMcpResource(): array
+    {
+        return [
+            ...$this->toArray(),
+            'steps' => $this->steps->map(fn (Step $step) => $step->toMcpResource())->values()->all(),
         ];
     }
 }

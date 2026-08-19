@@ -5,6 +5,8 @@ namespace App\Mcp\Servers;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
+use App\Mcp\Resources\WorkflowResource;
+use App\Mcp\Resources\WorkflowsResource;
 use App\Mcp\Resources\WorkspaceResource;
 use App\Mcp\Resources\WorkspacesResource;
 use Laravel\Mcp\Server;
@@ -29,6 +31,8 @@ class LaborForestServer extends Server
         ProjectResource::class,
         WorkspacesResource::class,
         WorkspaceResource::class,
+        WorkflowsResource::class,
+        WorkflowResource::class,
     ];
 
     protected array $prompts = [
