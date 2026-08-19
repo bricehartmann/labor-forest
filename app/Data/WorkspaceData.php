@@ -2,6 +2,7 @@
 
 namespace App\Data;
 
+use App\Contracts\McpResource;
 use App\Enums\GitStatus;
 use App\Enums\WorkspaceStatus;
 use Illuminate\Support\Str;
@@ -9,7 +10,7 @@ use Spatie\LaravelData\Attributes\WithCast;
 use Spatie\LaravelData\Casts\EnumCast;
 use Spatie\LaravelData\Data;
 
-class WorkspaceData extends Data
+class WorkspaceData extends Data implements McpResource
 {
     public function __construct(
         public bool $is_primary,
@@ -39,5 +40,16 @@ class WorkspaceData extends Data
     public function slugSnake(): string
     {
         return Str::slug($this->dirName(), '_');
+    }
+
+    public function toMcpResource(): array
+    {
+        return [
+            ...$this->toArray(),
+            'dir_name' => $this->dirName(),
+            'parent_dir' => $this->parentDir(),
+            'slug_kebab' => $this->slugKebab(),
+            'slug_snake' => $this->slugSnake(),
+        ];
     }
 }
