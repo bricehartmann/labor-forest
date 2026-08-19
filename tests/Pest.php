@@ -226,3 +226,24 @@ function componentRunLogStepData(
         log_id: $logId,
     );
 }
+
+/**
+ * A successful JSON-RPC reply to `initialize`, shaped as Laravel\Mcp\Server\Methods\Initialize returns it.
+ *
+ * @return array<string, mixed>
+ */
+function mcpInitializeReplyPayload(
+    string $name = 'LaborForest',
+    string $version = '1.2.3',
+    string $protocol = '2025-11-25',
+): array {
+    return [
+        'jsonrpc' => '2.0',
+        'id' => 1,
+        'result' => [
+            'protocolVersion' => $protocol,
+            'capabilities' => ['resources' => []],
+            'serverInfo' => ['name' => $name, 'version' => $version],
+        ],
+    ];
+}

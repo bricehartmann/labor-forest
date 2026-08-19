@@ -4,9 +4,12 @@ namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Concerns\Filament\Pages\NormalizesLaunchCommands;
+use App\Data\McpServerHealthData;
 use App\Data\SettingsData;
+use App\Enums\McpEndpoint;
 use App\Enums\Variable;
 use App\Exceptions\InvalidSettingsFile;
+use App\Exceptions\McpServerUnhealthy;
 use App\Rules\ValidVariables;
 use App\Services\McpService;
 use App\Services\SettingsService;
@@ -15,13 +18,16 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\KeyValueEntry;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Alignment;
+use Filament\Support\Enums\FontFamily;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\HtmlString;
@@ -58,10 +64,7 @@ class Settings extends Page
     {
         return $schema
             ->components([
-                Grid::make([
-                    'default' => 1,
-                    'xl' => 3,
-                ])
+                Grid::make(2)
                     ->schema([
                         Section::make('Workflows')
                             ->description('Configure how workflows run on your machine.')
@@ -75,25 +78,6 @@ class Settings extends Page
                                     ->required()
                                     ->suffix('seconds'),
                             ]),
-                        Section::make('MCP')
-                            ->description('Configure the local MCP server.')
-                            ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
-                            ->schema([
-                                Grid::make(['default' => 2])
-                                    ->schema([
-                                        Toggle::make('mcp_enabled')
-                                            ->label('Enable MCP')
-                                            ->inline(false)
-                                            ->live(),
-                                        TextInput::make('mcp_port')
-                                            ->disabled(fn (Get $get) => ! $get('mcp_enabled'))
-                                            ->label('MCP local port')
-                                            ->numeric()
-                                            ->minValue(1024)
-                                            ->maxValue(49151)
-                                            ->required(),
-                                    ]),
-                            ]),
                         Section::make('Dark mode')
                             ->description('Choose if you would like to use the dark theme.')
                             ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
@@ -102,6 +86,45 @@ class Settings extends Page
                                     ->inline(false)
                                     ->label('Enable dark mode'),
                             ]),
+                    ]),
+                Section::make('MCP')
+                    ->description('Configure the local MCP server.')
+                    ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
+                    ->schema([
+                        Grid::make(3)
+                            ->schema([
+                                Toggle::make('mcp_enabled')
+                                    ->label('Enable MCP')
+                                    ->inline(false)
+                                    ->live(),
+                                TextInput::make('mcp_port')
+                                    ->disabled(fn (Get $get) => ! $get('mcp_enabled'))
+                                    ->label('MCP local port')
+                                    ->numeric()
+                                    ->minValue(1024)
+                                    ->maxValue(49151)
+                                    ->required()
+                                    // The endpoint below is rebuilt from this value, so it
+                                    // has to reach the server before the form is saved.
+                                    ->live(onBlur: true),
+                                Actions::make([
+                                    Action::make('test_mcp_connection')
+                                        ->label('Test connection')
+                                        ->button()
+                                        ->icon(Heroicon::Bolt)
+                                        ->action(fn (Get $get) => $this->testMcpConnection($get->integer('mcp_port'))),
+                                ])
+                                    ->alignEnd()
+                                    ->verticallyAlignEnd(),
+                            ]),
+                        TextEntry::make('mcp_claude_command')
+                            ->label('Add to Claude Code')
+                            ->helperText('Run this in a terminal to register the server. Click to copy.')
+                            ->visible(fn (Get $get): bool => (bool) $get('mcp_enabled') && filled($get('mcp_port')))
+                            ->state(fn (Get $get): string => McpEndpoint::LABORFOREST->claudeAddCommand($get->integer('mcp_port')))
+                            ->fontFamily(FontFamily::Mono)
+                            ->copyable()
+                            ->copyMessage('Command copied'),
                     ]),
                 Section::make('Launch commands')
                     ->description(new HtmlString('Commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Each command can be overridden at the project level.'))
@@ -234,6 +257,35 @@ class Settings extends Page
             successTitle: null,
             failureTitle: 'The MCP server could not be updated.',
             failureBody: fn (Throwable $th): string => $th->getMessage(),
+        );
+    }
+
+    /**
+     * Report whether the endpoint the form currently names answers as this application's MCP server.
+     *
+     * The port comes from the form rather than from the saved settings, because the URL shown beside
+     * the button is built from that same value — a check that quietly probed a different port would
+     * be worse than no check at all. An unsaved port therefore reports what a client would find right
+     * now, which for a port nothing is serving yet is nothing.
+     *
+     * Reporting is switched off: every throwable this can produce is the diagnosis the user asked
+     * for rather than a defect, and a user retrying a stopped server would otherwise fill the log.
+     */
+    protected function testMcpConnection(int $port): void
+    {
+        static::resultNotificationOperation(
+            callback: fn (): McpServerHealthData => app(McpService::class)->checkMcpServer($port),
+            report: false,
+            successTitle: fn (McpServerHealthData $health): string => $health->status->title(),
+            successBody: fn (McpServerHealthData $health): string => $health->description(),
+            successIcon: fn (McpServerHealthData $health): BackedEnum => $health->status->icon(),
+            failureTitle: fn (Throwable $th): string => $th instanceof McpServerUnhealthy
+                ? $th->status->title()
+                : 'Whoops! Something went wrong.',
+            failureBody: fn (Throwable $th): string => $th->getMessage(),
+            failureIcon: fn (Throwable $th): BackedEnum => $th instanceof McpServerUnhealthy
+                ? $th->status->icon()
+                : Heroicon::XCircle,
         );
     }
 

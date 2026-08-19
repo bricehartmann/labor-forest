@@ -18,6 +18,31 @@ When a step exceeds the timeout, the step is killed, the workflow run is marked 
 
 Dark mode is controlled by a toggle switch and is enabled by default. This toggle is the only theme control in the app.
 
+## MCP
+
+LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). The server is local: it listens on `127.0.0.1` only, and it runs for as long as the app does.
+
+`Enable MCP` starts and stops the server. `MCP local port` sets the port it listens on, accepting any whole number from `1024` to `49151` and defaulting to `9189`. Saving a changed port stops the running server and starts a new one on the new port.
+
+With MCP enabled, the section shows one read-only field, `Add to Claude Code`: the one-line `claude mcp add` command that registers the server's endpoint, for example `http://127.0.0.1:9189/mcp/laborforest`. It copies to the clipboard when clicked, and it tracks the port field as you type it, before you save.
+
+The endpoint is plain HTTP, which is correct for a loopback address. Clients do not require TLS to connect to `127.0.0.1`, and a self-signed certificate would be rejected by clients that run on Node.
+
+### Test connection
+
+The `Test connection` button beside the `MCP local port` field completes a real MCP handshake against the port currently in the form and reports what it found. It exists because a client cannot tell these cases apart: most MCP clients report every one of them as either a missing server or a request to sign in.
+
+| Result | What it means |
+|--------|---------------|
+| The MCP server answered | The endpoint completed a handshake. The notification names the server, its version, and the protocol version. |
+| Nothing is listening | Nothing accepted the connection. The server is switched off, or it is running on a different port. |
+| The endpoint refused the request | The endpoint answered `401` or `403`. Either another application owns that port, or the app's own browser guard is still in front of the route. A client reports this as a request to authenticate. |
+| Something else is on that port | The endpoint answered, but not with an MCP handshake. Another application is using the port. |
+| The endpoint answered with an error | The endpoint answered with some other error status. |
+| That port belongs to the app window | The port names the server that renders LaborForest itself. Pick another port. |
+
+The check uses the port shown in the form rather than the saved one, so testing a port you have typed but not yet saved reports what a client would find right now, which is usually nothing.
+
 ## Launch commands
 
 Launch commands let you open an application against a specific Workspace's directory or local site. The commands shown on the Settings page are the defaults LaborForest ships with, not placeholders. Each field has a `Show example` button that fills the field with a working example.

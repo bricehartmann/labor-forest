@@ -1,11 +1,15 @@
 <?php
 
 use App\Data\SettingsData;
+use App\Enums\McpEndpoint;
 use App\Exceptions\InvalidSettingsFile;
 use App\Filament\Pages\Settings;
 use App\Services\McpService;
 use App\Services\SettingsService;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
@@ -213,6 +217,103 @@ describe('mcp server', function () {
             ->call('save')
             ->assertHasNoFormErrors()
             ->assertNotified('The MCP server could not be updated.');
+    });
+});
+
+describe('mcp endpoint', function () {
+    beforeEach(function () {
+        $this->mock(SettingsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSettings')->andReturn(settingsPageSettingsData(mcpEnabled: true, mcpPort: 9189));
+        });
+    });
+
+    it('shows the command that registers the endpoint for the saved port', function () {
+        Livewire::test(Settings::class)
+            ->assertOk()
+            ->assertSee('http://127.0.0.1:9189/mcp/laborforest')
+            ->assertSee('claude mcp add --transport http laborforest --scope user http://127.0.0.1:9189/mcp/laborforest');
+    });
+
+    it('rebuilds the command from the port field before it is saved', function () {
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_port' => 9876])
+            ->assertSee('http://127.0.0.1:9876/mcp/laborforest')
+            ->assertDontSee('http://127.0.0.1:9189/mcp/laborforest');
+    });
+
+    it('hides the command when mcp is switched off', function () {
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => false])
+            ->assertDontSee('/mcp/laborforest');
+    });
+});
+
+describe('test mcp connection', function () {
+    beforeEach(function () {
+        $this->mock(SettingsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSettings')->andReturn(settingsPageSettingsData(mcpEnabled: true, mcpPort: 9189));
+        });
+
+        $this->action = TestAction::make('test_mcp_connection')->schemaComponent();
+        $this->url = McpEndpoint::LABORFOREST->url(9189);
+    });
+
+    /**
+     * The real McpService is used here rather than a mock, because the one thing these tests exist to
+     * prove is that the port shown beside the button is the port that gets probed. A mock at the
+     * service boundary would assert only that the page called a method.
+     */
+    it('reports the server that answered', function () {
+        Http::fake([$this->url => Http::response(mcpInitializeReplyPayload())]);
+
+        Livewire::test(Settings::class)
+            ->callAction($this->action)
+            ->assertNotified('The MCP server answered');
+    });
+
+    it('names the browser guard when the endpoint answers 403', function () {
+        Http::fake([$this->url => Http::response('', 403)]);
+
+        Livewire::test(Settings::class)
+            ->callAction($this->action)
+            ->assertNotified('The endpoint refused the request');
+    });
+
+    it('reports nothing listening when the connection is refused', function () {
+        Http::fake([$this->url => fn () => throw new ConnectionException('Connection refused')]);
+
+        Livewire::test(Settings::class)
+            ->callAction($this->action)
+            ->assertNotified('Nothing is listening');
+    });
+
+    it('reports something else on a port that is not an mcp server', function () {
+        Http::fake([$this->url => Http::response('<html>Nope</html>')]);
+
+        Livewire::test(Settings::class)
+            ->callAction($this->action)
+            ->assertNotified('Something else is on that port');
+    });
+
+    it('probes the port in the form rather than the saved one', function () {
+        Http::fake(['http://127.0.0.1:9876/*' => Http::response(mcpInitializeReplyPayload())]);
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_port' => 9876])
+            ->callAction($this->action)
+            ->assertNotified('The MCP server answered');
+
+        Http::assertSent(fn (Request $request) => $request->url() === McpEndpoint::LABORFOREST->url(9876));
+    });
+
+    it('falls back to the generic failure for an error the check does not name', function () {
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('checkMcpServer')->once()->andThrow(new RuntimeException('Boom'));
+        });
+
+        Livewire::test(Settings::class)
+            ->callAction($this->action)
+            ->assertNotified('Whoops! Something went wrong.');
     });
 });
 

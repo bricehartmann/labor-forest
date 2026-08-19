@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -12,7 +13,6 @@ use Laravel\Mcp\Server\Contracts\Transport;
 #[Instructions(<<<'INSTRUCTIONS'
 LaborForest is a macOS desktop app for managing the git worktrees of your local repositories and running local workflows inside them.
 It exists to set up, tear down, and otherwise methodically modify local development environments.
-The local settings are retrievable using the Settings resource.
 INSTRUCTIONS)]
 class LaborForestServer extends Server
 {
@@ -22,6 +22,7 @@ class LaborForestServer extends Server
 
     protected array $resources = [
         SettingsResource::class,
+        ProjectsResource::class,
     ];
 
     protected array $prompts = [

@@ -1,6 +1,7 @@
 <?php
 
+use App\Enums\McpEndpoint;
 use App\Mcp\Servers\LaborForestServer;
 use Laravel\Mcp\Facades\Mcp;
 
-Mcp::web('/mcp/laborforest', LaborForestServer::class);
+Mcp::web(McpEndpoint::LABORFOREST->path(), LaborForestServer::class);
