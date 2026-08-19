@@ -10,6 +10,7 @@
     "sail": false,
     "skills": [
         "laravel-best-practices",
+        "mcp-development",
         "pest-testing",
         "tailwindcss-development"
     ]
