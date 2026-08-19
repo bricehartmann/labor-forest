@@ -3,6 +3,9 @@ A desktop app for macOS to manage git worktrees and local action workflows.
 
 ![LaborForest Demo](docs/images/demo.gif)
 
+## Article
+You can read the article introducing this project [here](https://brice.codes/posts/parallel-claude-code-sessions-with-laborforest).
+
 ## Documentation
 Please read the documentation below:
 - [Introduction](docs/introduction.md)
