@@ -29,6 +29,9 @@ class NativeAppServiceProvider implements ProvidesPhpIni
          */
         Cache::flush();
 
+        /**
+         * Heal the settings.yaml file with any newly added keys.
+         */
         rescue(fn () => app(SettingsService::class)->syncSettingsFile());
 
         /**

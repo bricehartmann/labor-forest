@@ -17,6 +17,7 @@ use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Alignment;
@@ -55,7 +56,10 @@ class Settings extends Page
     {
         return $schema
             ->components([
-                Grid::make(2)
+                Grid::make([
+                    'default' => 1,
+                    'xl' => 3,
+                ])
                     ->schema([
                         Section::make('Workflows')
                             ->description('Configure how workflows run on your machine.')
@@ -68,6 +72,25 @@ class Settings extends Page
                                     ->maxValue(3600)
                                     ->required()
                                     ->suffix('seconds'),
+                            ]),
+                        Section::make('MCP')
+                            ->description('Configure the local MCP server.')
+                            ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
+                            ->schema([
+                                Grid::make(['default' => 2])
+                                    ->schema([
+                                        Toggle::make('mcp_enabled')
+                                            ->label('Enable MCP')
+                                            ->inline(false)
+                                            ->live(),
+                                        TextInput::make('mcp_port')
+                                            ->disabled(fn (Get $get) => ! $get('mcp_enabled'))
+                                            ->label('MCP local port')
+                                            ->numeric()
+                                            ->minValue(1024)
+                                            ->maxValue(49151)
+                                            ->required(),
+                                    ]),
                             ]),
                         Section::make('Dark mode')
                             ->description('Choose if you would like to use the dark theme.')
@@ -171,6 +194,8 @@ class Settings extends Page
         );
 
         $this->applyTheme((bool) ($data['dark_mode'] ?? false));
+
+        // todo: stop, start, or restart MCP server
     }
 
     /**

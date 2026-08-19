@@ -11,6 +11,8 @@ class SettingsData extends Data
         public bool $dark_mode = true,
         public bool $cli_tools_installed = false,
         public int $workflow_step_timeout_seconds = 600,
+        public bool $mcp_enabled = true,
+        public int $mcp_port = 9189,
         public ?string $command_launch_ide = null,
         public ?string $command_launch_browser = null,
         public ?string $command_launch_terminal = null,
@@ -32,11 +34,20 @@ class SettingsData extends Data
                 'required',
                 'boolean',
             ],
+            'mcp_enabled' => [
+                'required',
+                'boolean',
+            ],
             'cli_tools_installed' => [
                 'required',
                 'boolean',
             ],
             'workflow_step_timeout_seconds' => [
+                'required',
+                'integer',
+                'min:0',
+            ],
+            'mcp_port' => [
                 'required',
                 'integer',
                 'min:0',
