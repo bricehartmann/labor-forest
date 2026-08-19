@@ -2,10 +2,11 @@
 
 namespace App\Data;
 
+use App\Contracts\McpResource;
 use App\Rules\ValidVariables;
 use Spatie\LaravelData\Data;
 
-class SettingsData extends Data
+class SettingsData extends Data implements McpResource
 {
     public function __construct(
         public bool $dark_mode = true,
@@ -68,5 +69,10 @@ class SettingsData extends Data
                 new ValidVariables,
             ],
         ];
+    }
+
+    public function toMcpResource(): array
+    {
+        return $this->toArray();
     }
 }

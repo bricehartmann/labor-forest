@@ -2,20 +2,27 @@
 
 namespace App\Mcp\Resources;
 
+use App\Concerns\Mcp\RespondsWithJson;
 use App\Services\SettingsService;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Attributes\MimeType;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
+use Laravel\Mcp\Server\Attributes\Uri;
 use Laravel\Mcp\Server\Resource;
 
 #[Name('settings')]
 #[Title('Settings')]
-#[Description('The current settings configuration as JSON.')]
+#[Description('The current settings configuration.')]
+#[Uri('laborforest://settings')]
+#[MimeType('application/json')]
 class SettingsResource extends Resource
 {
+    use RespondsWithJson;
+
     /**
      * Handle the resource request.
      */
@@ -27,6 +34,6 @@ class SettingsResource extends Resource
             return Response::error('Failed to load settings.');
         }
 
-        return Response::structured($settings->toArray());
+        return $this->json($settings->toMcpResource());
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use Laravel\Mcp\Server;
@@ -23,6 +24,7 @@ class LaborForestServer extends Server
     protected array $resources = [
         SettingsResource::class,
         ProjectsResource::class,
+        ProjectResource::class,
     ];
 
     protected array $prompts = [
