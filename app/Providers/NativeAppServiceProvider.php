@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Enums\WindowId;
 use App\Services\CliToolsService;
+use App\Services\McpService;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
 use Native\Desktop\Contracts\ProvidesPhpIni;
@@ -29,10 +30,25 @@ class NativeAppServiceProvider implements ProvidesPhpIni
          */
         Cache::flush();
 
+        $settingsService = app(SettingsService::class);
+
         /**
          * Heal the settings.yaml file with any newly added keys.
          */
-        rescue(fn () => app(SettingsService::class)->syncSettingsFile());
+        rescue(fn () => $settingsService->syncSettingsFile());
+
+        /**
+         * Start the MCP server, if enabled in settings. The enabled check is made here rather than
+         * left to the exception McpService throws, so a deliberately disabled server is not reported
+         * as a failure on every launch. A failure that does happen must not reach the caller: boot()
+         * has not opened the window yet, so an unusable MCP port would leave the user with a running
+         * app and nothing on screen.
+         */
+        $mcpEnabled = rescue(fn () => $settingsService->loadSettings()->mcp_enabled, false);
+
+        if ($mcpEnabled) {
+            rescue(fn () => app(McpService::class)->startMcpServer());
+        }
 
         /**
          * A cold `lf` launch is served here rather than from a deeplink event: macOS fires open-url

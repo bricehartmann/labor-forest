@@ -47,6 +47,18 @@ enum HostEnvKey: string
     case APP_EVENTS_CACHE = 'APP_EVENTS_CACHE';
 
     /**
+     * Marks the process serving the MCP server, so it can tell itself apart from the app window.
+     */
+    case MCP_SERVER = 'LABORFOREST_MCP_SERVER';
+
+    /**
+     * The toolchain this application was launched with, which a workspace must resolve for itself.
+     */
+    case PHP_BINARY = 'PHP_BINARY';
+
+    case COMPOSER_BINARY = 'COMPOSER_BINARY';
+
+    /**
      * Determine whether the variable name is injected by the NativePHP runtime.
      */
     public static function isInjectedName(string $name): bool

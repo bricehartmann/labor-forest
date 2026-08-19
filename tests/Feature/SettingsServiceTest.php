@@ -98,6 +98,8 @@ describe('saveSettings', function () {
             'dark_mode' => false,
             'cli_tools_installed' => false,
             'workflow_step_timeout_seconds' => 45,
+            'mcp_enabled' => true,
+            'mcp_port' => 9189,
             'command_launch_ide' => null,
             'command_launch_browser' => null,
             'command_launch_terminal' => null,

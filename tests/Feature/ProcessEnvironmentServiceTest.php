@@ -39,6 +39,8 @@ describe('sanitized', function () {
         'packages cache path' => ['APP_PACKAGES_CACHE'],
         'routes cache path' => ['APP_ROUTES_CACHE'],
         'events cache path' => ['APP_EVENTS_CACHE'],
+        'php binary' => ['PHP_BINARY'],
+        'composer binary' => ['COMPOSER_BINARY'],
     ]);
 
     it('drops a runtime injected name found in the host environment', function (string $name) {

@@ -3,6 +3,7 @@
 use App\Data\SettingsData;
 use App\Exceptions\InvalidSettingsFile;
 use App\Filament\Pages\Settings;
+use App\Services\McpService;
 use App\Services\SettingsService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Storage;
@@ -122,6 +123,99 @@ describe('save', function () {
     });
 });
 
+describe('mcp server', function () {
+    beforeEach(function () {
+        $this->settingsAre = function (bool $mcpEnabled, int $mcpPort = 9189) {
+            $this->mock(SettingsService::class, function (MockInterface $mock) use ($mcpEnabled, $mcpPort) {
+                $mock->shouldReceive('loadSettings')
+                    ->andReturn(settingsPageSettingsData(mcpEnabled: $mcpEnabled, mcpPort: $mcpPort));
+                $mock->shouldReceive('saveSettings');
+            });
+        };
+    });
+
+    it('starts the server when mcp is switched on', function () {
+        ($this->settingsAre)(mcpEnabled: false);
+
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('startMcpServer')->once();
+            $mock->shouldReceive('restartMcpServer')->never();
+            $mock->shouldReceive('stopMcpServer')->never();
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => true, 'mcp_port' => 9189])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('Settings saved');
+    });
+
+    it('restarts the server on the new port when the port changes', function () {
+        ($this->settingsAre)(mcpEnabled: true, mcpPort: 9189);
+
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('restartMcpServer')->once();
+            $mock->shouldReceive('startMcpServer')->never();
+            $mock->shouldReceive('stopMcpServer')->never();
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => true, 'mcp_port' => 9876])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('Settings saved');
+    });
+
+    it('stops the server when mcp is switched off', function () {
+        ($this->settingsAre)(mcpEnabled: true);
+
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('stopMcpServer')->once();
+            $mock->shouldReceive('startMcpServer')->never();
+            $mock->shouldReceive('restartMcpServer')->never();
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => false])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('Settings saved');
+    });
+
+    it('leaves a healthy server alone when an unrelated setting is saved', function () {
+        ($this->settingsAre)(mcpEnabled: true);
+
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('startMcpServer')->never();
+            $mock->shouldReceive('restartMcpServer')->never();
+            $mock->shouldReceive('stopMcpServer')->never();
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm(['workflow_step_timeout_seconds' => 90])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('Settings saved');
+    });
+
+    it('reports a failed process operation, having still written the settings', function () {
+        $this->mock(SettingsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSettings')->andReturn(settingsPageSettingsData(mcpEnabled: true));
+            $mock->shouldReceive('saveSettings')->once();
+        });
+
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('restartMcpServer')->once()->andThrow(new RuntimeException('Port in use'));
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => true, 'mcp_port' => 9876])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('The MCP server could not be updated.');
+    });
+});
+
 describe('validation', function () {
     beforeEach(function () {
         $this->mock(SettingsService::class, function (MockInterface $mock) {
@@ -183,9 +277,13 @@ function settingsPageSettingsData(
     ?string $ide = 'open "{{ WORKSPACE_DIR }}" -a phpstorm',
     ?string $browser = 'open "{{ ENV_APP_URL }}"',
     ?string $terminal = 'open "{{ WORKSPACE_DIR }}" -a iterm',
+    bool $mcpEnabled = true,
+    int $mcpPort = 9189,
 ): SettingsData {
     return new SettingsData(
         dark_mode: $darkMode,
+        mcp_enabled: $mcpEnabled,
+        mcp_port: $mcpPort,
         workflow_step_timeout_seconds: $workflowTimeoutSeconds,
         command_launch_ide: $ide,
         command_launch_browser: $browser,

@@ -8,6 +8,7 @@ use App\Data\SettingsData;
 use App\Enums\Variable;
 use App\Exceptions\InvalidSettingsFile;
 use App\Rules\ValidVariables;
+use App\Services\McpService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -25,6 +26,7 @@ use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\HtmlString;
 use Livewire\Attributes\Locked;
+use Throwable;
 
 class Settings extends Page
 {
@@ -181,6 +183,8 @@ class Settings extends Page
     {
         $data = $this->form->getState();
 
+        $previousSettings = rescue(fn () => app(SettingsService::class)->loadSettings());
+
         static::resultNotificationOperation(
             callback: function () use ($data) {
                 $settingsService = app(SettingsService::class);
@@ -195,7 +199,42 @@ class Settings extends Page
 
         $this->applyTheme((bool) ($data['dark_mode'] ?? false));
 
-        // todo: stop, start, or restart MCP server
+        $this->syncMcpServer($previousSettings, $data);
+    }
+
+    /**
+     * Bring the MCP server in line with the settings that were just written.
+     *
+     * Only a real change acts, so saving an unrelated setting leaves a healthy server alone. A
+     * changed port has to go through a stop and a start rather than a restart, because the runtime
+     * replays the argv a process was started with and would keep serving the old port.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function syncMcpServer(?SettingsData $previousSettings, array $data): void
+    {
+        $enabled = (bool) ($data['mcp_enabled'] ?? false);
+        $port = (int) ($data['mcp_port'] ?? 0);
+
+        $wasEnabled = $previousSettings?->mcp_enabled ?? false;
+
+        $operation = match (true) {
+            $enabled && ! $wasEnabled => fn (McpService $mcp) => $mcp->startMcpServer(),
+            $enabled && $port !== $previousSettings?->mcp_port => fn (McpService $mcp) => $mcp->restartMcpServer(),
+            ! $enabled && $wasEnabled => fn (McpService $mcp) => $mcp->stopMcpServer(),
+            default => null,
+        };
+
+        if ($operation === null) {
+            return;
+        }
+
+        static::resultNotificationOperation(
+            callback: fn () => $operation(app(McpService::class)),
+            successTitle: null,
+            failureTitle: 'The MCP server could not be updated.',
+            failureBody: fn (Throwable $th): string => $th->getMessage(),
+        );
     }
 
     /**
