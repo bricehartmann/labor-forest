@@ -9,6 +9,7 @@ use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\GitStatus;
 use App\Enums\WorkflowStatus;
+use App\Enums\WorkflowStepFailureReason;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
@@ -170,10 +171,14 @@ function componentStepData(
     string $name = 'Install dependencies',
     string $run = 'composer install',
     WorkflowStepType $type = WorkflowStepType::SHELL,
+    ?string $if = null,
+    ?string $unless = null,
 ): WorkflowStepData {
     return new WorkflowStepData(
         name: $name,
         type: $type,
+        if: $if,
+        unless: $unless,
         run: $run,
     );
 }
@@ -234,6 +239,7 @@ function componentRunLogStepData(
     string $output = 'done',
     ?string $hash = 'aaa111',
     ?WorkflowStepSkipReason $skipReason = null,
+    ?WorkflowStepFailureReason $failureReason = null,
     ?string $run = 'composer install',
     ?string $logId = null,
 ): WorkflowRunLogStepData {
@@ -243,6 +249,7 @@ function componentRunLogStepData(
         exitCode: $exitCode,
         output: $output,
         skip_reason: $skipReason,
+        failure_reason: $failureReason,
         run: $run,
         hash: $hash,
         log_id: $logId,

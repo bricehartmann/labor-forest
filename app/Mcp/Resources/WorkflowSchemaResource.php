@@ -133,13 +133,13 @@ class WorkflowSchemaResource extends Resource
                 'required' => false,
                 'type' => 'string',
                 'expands_variables' => true,
-                'description' => 'A shell command gating the step: the step runs only when this exits zero.',
+                'description' => 'A shell command gating the step: the step runs only when this exits zero, and is skipped otherwise. A gate that cannot be run at all fails the step instead of skipping it.',
             ],
             'unless' => [
                 'required' => false,
                 'type' => 'string',
                 'expands_variables' => true,
-                'description' => 'A shell command gating the step: the step is skipped when this exits zero.',
+                'description' => 'A shell command gating the step: the step is skipped when this exits zero, and runs otherwise. A gate that cannot be run at all fails the step instead of running it.',
             ],
             'env' => [
                 'required' => false,
@@ -196,9 +196,9 @@ class WorkflowSchemaResource extends Resource
         return [
             'working_directory' => 'the workspace directory',
             'shell_wrapping' => 'A `'.WorkflowStepType::SHELL->value.'` step\'s `run` is wrapped in `set -eu; set -o pipefail` so a failure mid-chain surfaces instead of being swallowed.',
-            'gates' => 'An `if` or `unless` command is not wrapped. Only its exit code is read, and a gate that fails never fails the run.',
+            'gates' => 'An `if` or `unless` command is not wrapped. Its exit code is only ever read as an answer, so a gate exiting non-zero skips the step rather than failing the run - a missing command reads as `false`. A gate that never reaches an exit code at all is different: it exceeds the step timeout, or a `{{ }}` in it does not resolve, and the step it guards is failed with a `failure_reason` naming the gate.',
             'environment' => 'LaborForest\'s own environment is stripped from every process, so a step inherits the user\'s shell environment rather than the app\'s.',
-            'timeout' => 'The workflow step timeout from settings applies to each spawned process, gates included, rather than to the run as a whole.',
+            'timeout' => 'The workflow step timeout from settings applies to each spawned process, gates included, rather than to the run as a whole. A process that exceeds it is killed and its step is failed with a `failure_reason` naming the timeout, so a killed step is distinguishable from the steps aborted behind it.',
             'failure' => 'The first failing step ends the run. Steps after it are logged as skipped, and the workspace is left in `'.WorkspaceStatus::ERROR->value.'`.',
             'nested_workflows' => 'A `'.WorkflowStepType::WORKFLOW->value.'` step runs its child inline: the child skips the status gate, always runs all of its own steps, writes its own run log, and fails the parent with it. A workflow cannot appear twice in one chain.',
         ];

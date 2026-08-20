@@ -32,6 +32,10 @@ Run logs are stored as YAML files in the Workspace's `.laborforest/ignored/logs`
 
 A step can be skipped for four reasons. It was not selected in the run modal, its `if` condition failed, its `unless` condition matched, or it was aborted because an earlier step failed.
 
+### Failed steps
+
+A step usually fails because its own command exited non-zero, and its `exitCode` says so. A step can also fail without ever getting an exit code of its own — its `if` or `unless` condition could not be run, one of them ran out of time, or the step's own command ran out of time. Those steps carry a `failure_reason` alongside the exit code, shown in the run log as `FAILURE REASON`, so a broken condition is not mistaken for a command that ran and said no.
+
 ## Implementing workflows
 
 Workflows are managed manually through your YAML editor of choice. A Workflow's name is its file name without the extension, so `up.yaml` is run as `up`. A `name` key inside the file is ignored.
@@ -101,7 +105,9 @@ LaborForest strips its own environment from the processes it spawns, so a workfl
 
 There are three types of steps. `shell` runs a shell command, `update_env` updates values in the Workspace's `.env` file, and `workflow` runs a nested Workflow.
 
-Every step type supports `if` and `unless`. Both are shell commands, evaluated in the Workspace directory. `if` skips the step when its command exits non-zero. `unless` skips the step when its command exits zero. A condition's own failure never fails the Workflow.
+Every step type supports `if` and `unless`. Both are shell commands, evaluated in the Workspace directory. `if` skips the step when its command exits non-zero. `unless` skips the step when its command exits zero.
+
+A condition's exit code is only ever read as an answer, so a condition that exits non-zero never fails the Workflow — a missing command or a failing test just means the step is skipped. A condition that cannot be run at all is different: if it exceeds the [step timeout](settings.md), or a `{{ }}` in it does not resolve, the step it guards is failed and the run ends there.
 
 #### Step type: `shell`
 The `shell` step type runs a shell command.

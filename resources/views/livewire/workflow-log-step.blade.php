@@ -27,6 +27,12 @@
                         <td class="border border-slate-300 px-3 py-2 w-full">{{ $this->stepData->skip_reason->getLabel() }}</td>
                     </tr>
                     @endif
+                    @if($this->stepData->failure_reason)
+                    <tr>
+                        <td class="border border-slate-300 px-3 py-2 whitespace-nowrap">FAILURE REASON</td>
+                        <td class="border border-slate-300 px-3 py-2 w-full">{{ $this->stepData->failure_reason->getLabel() }}</td>
+                    </tr>
+                    @endif
                     @if($this->stepData->if)
                     <tr>
                         <td class="border border-slate-300 px-3 py-2 whitespace-nowrap">IF CONDITION</td>

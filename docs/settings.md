@@ -12,7 +12,7 @@ The timeout is specified in seconds and defaults to `600` (10 minutes). The form
 
 The timeout applies to each process a workflow spawns, not to the workflow run as a whole. Every `shell` step's `run` command gets the full budget, and so does every `if` and `unless` condition. A workflow with ten steps and a 600 second timeout can therefore run for much longer than 600 seconds.
 
-When a step exceeds the timeout, the step is killed, the workflow run is marked as failed, the remaining steps are marked as aborted, and the Workspace status becomes `error`.
+When a step exceeds the timeout, the step is killed, the workflow run is marked as failed, the remaining steps are marked as aborted, and the Workspace status becomes `error`. The killed step is recorded as failed with a `failure_reason` naming the timeout, so it is distinguishable in the run log from the aborted steps behind it. A timed-out `if` or `unless` condition fails the step it was guarding the same way, even though a condition's exit code on its own never fails a run.
 
 ## Dark mode
 

@@ -1,6 +1,7 @@
 <?php
 
 use App\Data\WorkflowRunLogStepData;
+use App\Enums\WorkflowStepFailureReason;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Filament\Pages\WorkflowLog;
@@ -71,6 +72,25 @@ describe('rendering a shell step', function () {
             ->assertSee(WorkflowStepSkipReason::NOT_SELECTED->getLabel())
             ->assertSee('RUN')
             ->assertDontSee('EXIT CODE');
+    });
+
+    it('renders the failure reason of a step whose gate broke, alongside its exit code', function () {
+        // a broken gate is a failure rather than a skip, so the step must read as failed and still
+        // say which gate it was that never answered
+        Livewire::test(WorkflowLogStep::class, [
+            'step' => workflowLogStepArray(componentRunLogStepData(
+                exitCode: 1,
+                output: 'the if condition could not be run: sh: not executable',
+                failureReason: WorkflowStepFailureReason::IF_GATE_FAILED,
+            )),
+            'uuid' => $this->uuid,
+            'slug' => $this->slug,
+        ])
+            ->assertOk()
+            ->assertSee('FAILURE REASON')
+            ->assertSee(WorkflowStepFailureReason::IF_GATE_FAILED->getLabel())
+            ->assertSee('EXIT CODE')
+            ->assertDontSee('SKIP REASON');
     });
 
     it('renders no exit code and an empty output cell for a step that has not run yet', function () {

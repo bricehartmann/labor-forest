@@ -54,9 +54,12 @@ class DiagnoseWorkflowRunPrompt extends Prompt
         2. Open the newest run that ended `{$this->failedStatus()}`. Its top level carries `id`,
            `name`, `parent`, `timestamp`, `status`, `exception` and `steps`.
         3. Find the failing step. Each step entry carries `name`, `type`, `if`, `unless`, `run`,
-           `map`, `env`, `exitCode`, `output`, `skip_reason` and timestamps. The failing step is the
-           one with a non-zero `exitCode`; the steps after it carry `skip_reason: aborted`, meaning
-           they never ran rather than that they were skipped on purpose.
+           `map`, `env`, `exitCode`, `output`, `skip_reason`, `failure_reason` and timestamps. The
+           failing step is the one with a non-zero `exitCode`; the steps after it carry
+           `skip_reason: aborted`, meaning they never ran rather than that they were skipped on
+           purpose. A `failure_reason` on the failing step means its own command never got to
+           answer - an `if` or `unless` condition could not be run, or something ran out of time -
+           so read the condition and the timeout before reading the command.
         4. Read that step's `output`. It is the raw interleaved stdout and stderr with ANSI escapes
            still in it, so read past the escape codes rather than treating them as content.
         5. If the failing step is of type `workflow`, its `log_id` names the child run's own log file
