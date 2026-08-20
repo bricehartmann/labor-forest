@@ -15,6 +15,7 @@ use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
 use App\Mcp\Tools\LaunchTerminalTool;
 use App\Mcp\Tools\RemoveProjectTool;
+use App\Mcp\Tools\UpdateSettingsTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -37,6 +38,7 @@ class LaborForestServer extends Server
         RemoveProjectTool::class,
         AddWorkspaceTool::class,
         AddWorkspaceExampleWorkflowsTool::class,
+        UpdateSettingsTool::class,
     ];
 
     protected array $resources = [
