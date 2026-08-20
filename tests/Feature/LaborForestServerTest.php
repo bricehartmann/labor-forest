@@ -3,6 +3,7 @@
 use App\Data\ProjectData;
 use App\Data\SettingsData;
 use App\Enums\McpUri;
+use App\Events\GlobalRefresh;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\InvalidSettingsFile;
 use App\Exceptions\ProjectDirectoryNotFound;
@@ -13,6 +14,7 @@ use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use App\Mcp\Servers\LaborForestServer;
 use App\Mcp\Tools\AddProjectTool;
+use App\Mcp\Tools\AddWorkspaceExampleWorkflowsTool;
 use App\Mcp\Tools\AddWorkspaceTool;
 use App\Mcp\Tools\FindProjectByPathTool;
 use App\Mcp\Tools\LaunchBrowserTool;
@@ -23,6 +25,7 @@ use App\Services\GitService;
 use App\Services\LaunchService;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
+use Illuminate\Support\Facades\Event;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Resource;
@@ -189,6 +192,7 @@ describe('tools', function () {
                 'add-project',
                 'remove-project',
                 'add-workspace',
+                'add-workspace-example-workflows',
             ]);
     });
 
@@ -292,6 +296,8 @@ describe('tools', function () {
     })->with('launch tools');
 
     it('links a new workspace to the project owning it', function () {
+        Event::fake([GlobalRefresh::class]);
+
         $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta');
 
         $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
@@ -307,6 +313,84 @@ describe('tools', function () {
         LaborForestServer::tool(AddWorkspaceTool::class, ['path' => '/tmp/beta', 'branch' => 'feature'])
             ->assertOk()
             ->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('links to the resource of a newly added project', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('addProject')->once()->with('/tmp/beta')
+            ->andReturn(componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta'));
+
+        // The trailing slash is trimmed before the project is added
+        $response = (new AddProjectTool)->handle(new Request(['path' => '/tmp/beta/']));
+
+        expect($response->content()->toArray())->toBe([
+            'type' => 'resource_link',
+            'uri' => 'laborforest://projects/22222222-2222-2222-2222-222222222222',
+            'name' => 'beta',
+            'title' => 'beta',
+            'description' => '/tmp/beta',
+            'mimeType' => 'application/json',
+        ]);
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('removes the project the uuid names', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('removeProject')->once()
+            ->with('22222222-2222-2222-2222-222222222222', true, false);
+
+        LaborForestServer::tool(RemoveProjectTool::class, [
+            'uuid' => '22222222-2222-2222-2222-222222222222',
+            'remove_directory' => true,
+            'remove_worktrees' => false,
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('seeds the chosen example workflows into the workspace', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('listExampleWorkflowPaths')->andReturn(collect([
+                'example-workflows/bare',
+                'example-workflows/laravel',
+            ]));
+            $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo-feature')
+                ->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()->with('/tmp/repo-feature')
+                ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
+            $mock->shouldReceive('initializeWorkspaceStarterWorkflows')->once()
+                ->with('/tmp/repo-feature', 'example-workflows/laravel');
+        });
+
+        LaborForestServer::tool(AddWorkspaceExampleWorkflowsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'example' => 'laravel',
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses an example workflow set it does not offer', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('listExampleWorkflowPaths')->andReturn(collect(['example-workflows/bare']));
+
+        LaborForestServer::tool(AddWorkspaceExampleWorkflowsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'example' => 'nope',
+        ])->assertHasErrors();
+
+        Event::assertNotDispatched(GlobalRefresh::class);
     });
 
     it('reports a uuid that matches no project instead of failing on it', function () {

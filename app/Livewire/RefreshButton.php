@@ -20,7 +20,7 @@ class RefreshButton extends Component
     public function globalRefresh(): void
     {
         $this->flushCache();
-        $this->js('window.location.reload');
+        $this->js('window.location.reload()');
     }
 
     /**
