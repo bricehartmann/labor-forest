@@ -71,9 +71,9 @@ class DiagnoseWorkflowRunPrompt extends Prompt
 
         - A run whose `status` is `{$this->pendingStatus()}` or `{$this->runningStatus()}` is a run in
           flight, not a failure. Its log is being written as you read it.
-        - A failed run leaves the workspace in `{$this->errorStatus()}`, and nothing on this server can
-          clear that — only the user can, from the app. So end by telling the user to clear the
-          status, rather than trying to start another run yourself.
+        - A failed run leaves the workspace in `{$this->errorStatus()}`, and nothing runs while it sits
+          there. Once the cause is fixed and `validate-workflow` passes, clear it with
+          `override-workspace-status`. Whether to start another run is the user's call, not yours.
         GUIDANCE;
 
         $task = $workflow === null

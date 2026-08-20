@@ -2,7 +2,7 @@
 
 ## Overview
 
-LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). An agent that connects to it can list your Projects and Workspaces, create and remove git worktrees, seed workflows into a Workspace, check those workflow files over without running them, run them, delete the run logs they leave behind, open your IDE, terminal or browser against a Workspace, and change both the global settings and a single Project's launch command overrides.
+LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). An agent that connects to it can list your Projects and Workspaces, create and remove git worktrees, seed workflows into a Workspace, check those workflow files over without running them, run them, override the status a Workspace holds, delete the run logs they leave behind, open your IDE, terminal or browser against a Workspace, and change both the global settings and a single Project's launch command overrides.
 
 The server is local. It listens on `127.0.0.1` only, it runs as a child process of the app for as long as the app is open, and it is off until you switch it on. When you do, it starts on port `9189` in read-only mode, publishing only the tools that change nothing. The toggle, the read-only switch, the port, the `Add to Claude Code` command, the `Regenerate token` action and the `Test connection` button all live on the [Settings](settings.md) screen.
 
@@ -37,6 +37,8 @@ The app window is served by its own process, which refuses requests that do not 
 **Write a workflow it has no tool for.** No tool creates or edits a workflow file. The agent reads the `workflow-schema` resource, writes the YAML with its own file tools, and calls `validate-workflow` to check it. The `author-workflow` and `convert-setup-to-workflow` prompts carry that procedure.
 
 **Reclaim what a busy Workspace has accumulated.** Every run of a workflow, and every child workflow it starts, leaves a log file behind. `purge-workflow-logs` deletes the logs of one workflow in one Workspace, leaving the runs that are still going.
+
+**Pick a failed run back up.** A run that failed leaves the Workspace in `error`, where nothing else will run. The `diagnose-workflow-run` prompt sends the agent to the log files to find out why; it fixes the cause and confirms the fix with `validate-workflow`; then `override-workspace-status` puts the Workspace back to `ready` or `suspended` and `run-workflow` starts the run again.
 
 ## Resources
 
@@ -75,11 +77,12 @@ The `projects` list is ordered by when each Project was last opened. It answers 
 | `add-workspace`                   |             | withheld       | `path` or `uuid`, `branch`, `base_branch`                               | `success`                      |
 | `add-workspace-example-workflows` |             | withheld       | `path` to a Workspace, `example`                                        | `success`                      |
 | `run-workflow`                    | destructive | withheld       | `path` to a Workspace, `workflow`                                       | The workflow run log ID        |
+| `override-workspace-status`       | idempotent  | withheld       | `path` to a Workspace, `status`                                         | `success`                      |
 | `update-settings`                 | destructive | withheld       | `dark_mode`, `workflow_step_timeout_seconds`, the three launch commands | `success`                      |
 | `update-project-launch-commands`  | destructive | withheld       | `path` or `uuid`, the three launch commands                             | `success`                      |
 | `purge-workflow-logs`             | destructive | withheld       | `path` to a Workspace, `workflow`                                       | What it purged and skipped     |
 
-The annotation is what the client is told about the tool before it calls it. A client that asks you to approve destructive tool calls will ask about `run-workflow`, `remove-project`, `update-settings`, `update-project-launch-commands` and `purge-workflow-logs`. The three launch tools carry no annotation: they change nothing in LaborForest, but they do run a command you configured, and calling them read-only would tell a client there is nothing to ask you about.
+The annotation is what the client is told about the tool before it calls it. A client that asks you to approve destructive tool calls will ask about `run-workflow`, `remove-project`, `update-settings`, `update-project-launch-commands` and `purge-workflow-logs`. The three launch tools carry no annotation: they change nothing in LaborForest, but they do run a command you configured, and calling them read-only would tell a client there is nothing to ask you about. `override-workspace-status` is annotated idempotent rather than destructive, because setting the same status twice leaves the same Workspace and destroys nothing, and an agent recovering a failed run should not have to interrupt you to do it.
 
 `Read-only mode` is which tools the server publishes at all while the read-only switch on the [Settings](settings.md) screen is on, which is where a newly enabled server starts.
 
@@ -125,6 +128,16 @@ Runs that are still pending or running are counted and left on disk, because the
 
 A name matching no log is `Purged 0 log records.` rather than an error, so calling it twice is safe. Unlike `run-workflow`, the tool does not check that the workflow file still exists — logs outlive the workflow that wrote them, which is exactly when purging them is worth doing.
 
+### Overriding a Workspace status
+
+`override-workspace-status` takes the Workspace path and the `status` to give it, and accepts `ready` or `suspended` — the same two the `Override status` action on the Project screen offers, and the same two a workflow file may name. It is the MCP equivalent of that action.
+
+It exists for the one status a workflow can leave behind but never clear. A failed run ends in `error`, a Workspace in `error` runs nothing, and until this tool the only way out of it was the app. An agent that has diagnosed the failure and fixed the workflow can now clear the status and run again in the same turn.
+
+A Workspace whose run is still in flight — `pending` or `working` — is refused, with a message naming the status it holds: `Workspace at path '/tmp/repo-feature' has a workflow run in flight and is 'working'. Override the status from the app once the run has finished.` The job that is running writes its own final status when it ends, so an override applied now would be overwritten moments later; worse, a Workspace forced to `ready` mid-run would accept a second `run-workflow` against the same worktree. The app's own override carries no such guard, and stays the way out when a job has died without writing its status back.
+
+The statuses themselves, and the gate they feed, are in [Workflows](workflows.md).
+
 ### Changing settings
 
 Every argument to `update-settings` is optional, and one that is omitted or `null` leaves the stored value alone. Passing an **empty string** to a launch command clears it instead, which is how a command is removed rather than replaced. The same three values are the rule for `update-project-launch-commands` below.
@@ -167,7 +180,7 @@ Nothing on this server reports on a run. `run-workflow` returns a run log ID and
 
 It explains what to read: the log file names sort by time, so the newest run is the last one; the failing step is the one with a non-zero `exitCode`, while the steps after it carry `skip_reason: aborted` and never ran at all; the `output` is raw stdout and stderr with ANSI escapes still in it; and a failing `workflow` step's `log_id` names the child run's own log, which is where the real failure is.
 
-It ends by handing back to you. A failed run leaves the Workspace in `error`, and nothing over MCP can clear that status — only you can, from the app.
+It ends by handing back to you, but only for the decision. A failed run leaves the Workspace in `error`, and the prompt has the agent clear it with `override-workspace-status` once the cause is fixed and `validate-workflow` passes — then stop, because whether to start another run is yours to say.
 
 ## Errors
 

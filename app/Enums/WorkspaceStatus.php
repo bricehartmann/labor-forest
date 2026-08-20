@@ -55,6 +55,17 @@ enum WorkspaceStatus: string implements HasColor, HasLabel
     }
 
     /**
+     * Whether this status belongs to a workflow run in flight, rather than to a workspace at rest.
+     */
+    public function hasRunInFlight(): bool
+    {
+        return match ($this) {
+            self::PENDING, self::WORKING => true,
+            default => false,
+        };
+    }
+
+    /**
      * Whether a workflow declaring the given require_status may be launched by hand from this status.
      */
     public function allowsWorkflowRequiring(?WorkspaceStatus $requiredStatus): bool

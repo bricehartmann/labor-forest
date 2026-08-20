@@ -45,7 +45,7 @@ The table updates itself while a workflow runs, so statuses change without you r
 | `error`     | The last workflow run failed                                                  |
 | `unknown`   | LaborForest could not read the Workspace's status file                        |
 
-Workflows can only be run against a Workspace that is `ready` or `suspended`. A Workspace in `pending`, `working`, `error`, or `unknown` runs nothing until its status changes. For `error` and `unknown` you change it yourself with the `Override status` action described below.
+Workflows can only be run against a Workspace that is `ready` or `suspended`. A Workspace in `pending`, `working`, `error`, or `unknown` runs nothing until its status changes. For `error` and `unknown` you change it yourself with the `Override status` action described below, or an agent does it for you with the `override-workspace-status` tool described in [MCP](mcp.md).
 
 ## Launch menu button
 

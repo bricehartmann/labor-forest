@@ -36,6 +36,7 @@ use App\Mcp\Tools\FindProjectByPathTool;
 use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
 use App\Mcp\Tools\LaunchTerminalTool;
+use App\Mcp\Tools\OverrideWorkspaceStatusTool;
 use App\Mcp\Tools\PurgeWorkflowLogsTool;
 use App\Mcp\Tools\RemoveProjectTool;
 use App\Mcp\Tools\RunWorkflowTool;
@@ -453,8 +454,8 @@ describe('prompts', function () {
             ->assertSee('skip_reason: aborted')
             // a nested workflow's failure is in the child's own log
             ->assertSee('log_id')
-            // the one thing the client cannot do for the user
-            ->assertSee('only the user can, from the app');
+            // the status a failed run leaves behind, and the tool that clears it
+            ->assertSee('override-workspace-status');
     });
 
     it('scopes the diagnosis to one workflow when it was named', function () {
@@ -517,6 +518,7 @@ describe('tools', function () {
                 'add-workspace-example-workflows',
                 'validate-workflow',
                 'run-workflow',
+                'override-workspace-status',
                 'update-settings',
                 'update-project-launch-commands',
                 'purge-workflow-logs',
@@ -555,7 +557,7 @@ describe('tools', function () {
 
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
-        expect($context->tools())->toHaveCount(13);
+        expect($context->tools())->toHaveCount(14);
     });
 
     it('marks running a workflow destructive, because a step is arbitrary shell', function () {
@@ -1513,7 +1515,95 @@ describe('tools', function () {
 
         Event::assertNotDispatched(GlobalRefresh::class);
     });
+
+    it('overrides the status of the workspace at the path', function (WorkspaceStatus $status) {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved()
+            ->shouldReceive('updateProjectWorkspaceStatus')->once()
+            ->with('/tmp/repo-feature', $status);
+
+        // The trailing slash is trimmed before the workspace is looked up
+        LaborForestServer::tool(OverrideWorkspaceStatusTool::class, [
+            'path' => '/tmp/repo-feature/',
+            'status' => $status->value,
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    })->with('overridable statuses');
+
+    it('clears the error status a failed run leaves behind, which is what it is for', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved(WorkspaceStatus::ERROR)
+            ->shouldReceive('updateProjectWorkspaceStatus')->once()
+            ->with('/tmp/repo-feature', WorkspaceStatus::READY);
+
+        LaborForestServer::tool(OverrideWorkspaceStatusTool::class, [
+            'path' => '/tmp/repo-feature',
+            'status' => WorkspaceStatus::READY->value,
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses a workspace whose run is still in flight', function (WorkspaceStatus $status) {
+        Event::fake([GlobalRefresh::class]);
+
+        // the finishing job writes its own final status, which would overwrite the override
+        mcpWorkspaceIsResolved($status)
+            ->shouldNotReceive('updateProjectWorkspaceStatus');
+
+        LaborForestServer::tool(OverrideWorkspaceStatusTool::class, [
+            'path' => '/tmp/repo-feature',
+            'status' => WorkspaceStatus::READY->value,
+        ])->assertHasErrors([
+            "Workspace at path '/tmp/repo-feature' has a workflow run in flight and is '{$status->value}'. Override the status from the app once the run has finished.",
+        ]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    })->with('in flight statuses');
+
+    it('reports a workspace it cannot override the status of', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/nope')
+            ->andThrow(new WorkspaceNotFound('/tmp/nope'));
+
+        LaborForestServer::tool(OverrideWorkspaceStatusTool::class, [
+            'path' => '/tmp/nope',
+            'status' => WorkspaceStatus::READY->value,
+        ])->assertHasErrors([(new WorkspaceNotFound('/tmp/nope'))->getMessage()]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a status file it cannot write', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved()
+            ->shouldReceive('updateProjectWorkspaceStatus')->once()
+            ->andThrow(new ProjectDirectoryNotFound('/tmp/repo-feature'));
+
+        LaborForestServer::tool(OverrideWorkspaceStatusTool::class, [
+            'path' => '/tmp/repo-feature',
+            'status' => WorkspaceStatus::SUSPENDED->value,
+        ])->assertHasErrors([(new ProjectDirectoryNotFound('/tmp/repo-feature'))->getMessage()]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
 });
+
+dataset('overridable statuses', [
+    'ready' => [WorkspaceStatus::READY],
+    'suspended' => [WorkspaceStatus::SUSPENDED],
+]);
+
+dataset('in flight statuses', [
+    'pending' => [WorkspaceStatus::PENDING],
+    'working' => [WorkspaceStatus::WORKING],
+]);
 
 dataset('launch tools', [
     'ide' => [LaunchIdeTool::class, 'launchIde'],
@@ -1562,11 +1652,11 @@ function mcpWorkflowFileExists(string $workflowPath): void
 /**
  * Answer the workspace lookup ResolvesWorkspace performs for the standard fixture workspace.
  */
-function mcpWorkspaceIsResolved(): void
+function mcpWorkspaceIsResolved(WorkspaceStatus $status = WorkspaceStatus::READY): MockInterface
 {
-    test()->mock(ProjectsService::class, function (MockInterface $mock) {
+    return test()->mock(ProjectsService::class, function (MockInterface $mock) use ($status) {
         $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo-feature')
-            ->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            ->andReturn(componentWorkspaceData('/tmp/repo-feature', status: $status));
         $mock->shouldReceive('loadProjectFromWorkspace')->once()->with('/tmp/repo-feature')
             ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
     });

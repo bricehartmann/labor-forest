@@ -18,6 +18,7 @@ use App\Mcp\Tools\FindProjectByPathTool;
 use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
 use App\Mcp\Tools\LaunchTerminalTool;
+use App\Mcp\Tools\OverrideWorkspaceStatusTool;
 use App\Mcp\Tools\PurgeWorkflowLogsTool;
 use App\Mcp\Tools\RemoveProjectTool;
 use App\Mcp\Tools\RunWorkflowTool;
@@ -74,10 +75,13 @@ copies. It is not CI, and it is not a way to manage agents.
 - A run is gated on the Workspace's `status`. Only `ready` and `suspended` may run anything at all;
   `pending`, `working`, `error` and `unknown` run nothing. A workflow declaring `require_status` needs
   the Workspace to hold exactly that status. A refusal reads, for example, `Workflow [up] requires the
-  workspace to be suspended, but it is ready.` Clearing an `error` or `unknown` status is something only
-  the user can do, from the app.
+  workspace to be suspended, but it is ready.` Clear an `error` or `unknown` status with
+  `override-workspace-status`, which sets a Workspace to `ready` or `suspended` and is what makes runs
+  possible again.
 - While a run is going the status is `working`. Afterwards it is `error` if any step failed, otherwise
-  the workflow's `ending_status`, otherwise whatever the Workspace held before the run.
+  the workflow's `ending_status`, otherwise whatever the Workspace held before the run. A Workspace whose
+  run is still in flight — `pending` or `working` — cannot be overridden, because the finishing job writes
+  its own final status over anything set underneath it.
 - `validate-workflow` is how to check a workflow without consequences: it parses the file and reports its
   steps, and starts nothing. It reads the file alone and never the Workspace, so it cannot tell you
   whether the status gate would let a run through, nor whether an `ENV_` tag resolves right now.
@@ -95,6 +99,15 @@ from a description of what it should do, `convert-setup-to-workflow` turns a pro
 instructions into the workflows that reproduce them, and `diagnose-workflow-run` works out why a run
 failed by reading the run logs the Workspace keeps at `.laborforest/ignored/logs/`. Those logs are
 files on disk; nothing here serves them, and nothing here reports on a run in flight.
+
+## Recovering a failed run
+
+A run that failed leaves the Workspace in `error`, and every further run is refused while it sits there.
+Recover it in this order: read the run log in `.laborforest/ignored/logs/`, which the
+`diagnose-workflow-run` prompt walks you through; fix the cause, usually the workflow file, and confirm the
+fix with `validate-workflow`; call `override-workspace-status` to put the Workspace back to the status the
+workflow needs; and only then `run-workflow` again. Clearing the status without fixing the cause just
+reproduces the failure.
 
 ## Constraints
 
@@ -134,6 +147,7 @@ class LaborForestServer extends Server
         AddWorkspaceExampleWorkflowsTool::class,
         ValidateWorkflowTool::class,
         RunWorkflowTool::class,
+        OverrideWorkspaceStatusTool::class,
         UpdateSettingsTool::class,
         UpdateProjectLaunchCommandsTool::class,
         PurgeWorkflowLogsTool::class,
