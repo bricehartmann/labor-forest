@@ -3,6 +3,7 @@
 namespace App\Mcp\Resources;
 
 use App\Concerns\Mcp\RespondsWithJson;
+use App\Enums\McpUri;
 use App\Services\SettingsService;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -17,7 +18,7 @@ use Laravel\Mcp\Server\Resource;
 #[Name('settings')]
 #[Title('Settings')]
 #[Description('The current settings configuration.')]
-#[Uri('laborforest://settings')]
+#[Uri(McpUri::SETTINGS->value)]
 #[MimeType('application/json')]
 class SettingsResource extends Resource
 {

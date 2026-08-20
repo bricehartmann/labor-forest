@@ -5,6 +5,7 @@ namespace App\Mcp\Resources;
 use App\Concerns\Mcp\RespondsWithJson;
 use App\Data\ProjectData;
 use App\Data\WorkspaceData;
+use App\Enums\McpUri;
 use App\Services\ProjectsService;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -50,6 +51,6 @@ class WorkspacesResource extends Resource implements HasUriTemplate
 
     public function uriTemplate(): UriTemplate
     {
-        return new UriTemplate('laborforest://projects/{uuid}/workspaces');
+        return McpUri::WORKSPACES->template();
     }
 }

@@ -5,12 +5,8 @@ namespace App\Mcp\Servers;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
-use App\Mcp\Resources\WorkflowLogResource;
-use App\Mcp\Resources\WorkflowLogsResource;
-use App\Mcp\Resources\WorkflowResource;
-use App\Mcp\Resources\WorkflowsResource;
-use App\Mcp\Resources\WorkspaceResource;
 use App\Mcp\Resources\WorkspacesResource;
+use App\Mcp\Tools\FindProjectByPathTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -24,7 +20,7 @@ INSTRUCTIONS)]
 class LaborForestServer extends Server
 {
     protected array $tools = [
-        //
+        FindProjectByPathTool::class,
     ];
 
     protected array $resources = [

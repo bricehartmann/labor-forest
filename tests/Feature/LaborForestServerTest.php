@@ -1,20 +1,21 @@
 <?php
 
+use App\Data\ProjectData;
 use App\Data\SettingsData;
-use App\Enums\WorkflowStatus;
+use App\Enums\McpUri;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\InvalidSettingsFile;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
-use App\Mcp\Resources\WorkflowLogResource;
-use App\Mcp\Resources\WorkflowLogsResource;
 use App\Mcp\Servers\LaborForestServer;
+use App\Mcp\Tools\FindProjectByPathTool;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
+use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Resource;
-use Mockery\MockInterface;
+use Laravel\Mcp\Server\Tool;
 
 it('reports the application version to connecting clients', function () {
     config(['nativephp.version' => '1.2.3']);
@@ -32,6 +33,24 @@ it('falls back to the development version when the app version is unset', functi
     expect($server->createContext()->implementation->version)->toBe('main');
 });
 
+describe('uris', function () {
+    it('fills every placeholder in a templated uri', function () {
+        expect(McpUri::PROJECT->build(['uuid' => '22222222-2222-2222-2222-222222222222']))
+            ->toBe('laborforest://projects/22222222-2222-2222-2222-222222222222')
+            ->and(McpUri::WORKSPACES->build(['uuid' => '22222222-2222-2222-2222-222222222222']))
+            ->toBe('laborforest://projects/22222222-2222-2222-2222-222222222222/workspaces');
+    });
+
+    it('returns a fixed uri unchanged', function () {
+        expect(McpUri::SETTINGS->build())->toBe('laborforest://settings');
+    });
+
+    it('refuses to emit a uri with a placeholder left in it', function () {
+        expect(fn () => McpUri::PROJECT->build(['slugKebab' => 'beta']))
+            ->toThrow(InvalidArgumentException::class, 'Unresolved placeholder in MCP URI [laborforest://projects/{uuid}].');
+    });
+});
+
 describe('resources', function () {
     it('lists the fixed-uri resources separately from the templated ones', function () {
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
@@ -41,16 +60,11 @@ describe('resources', function () {
             ->and($context->resources()->map(fn (Resource $resource) => $resource->uri())->values()->all())
             ->toBe(['laborforest://settings', 'laborforest://projects'])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => $resource->name())->values()->all())
-            ->toBe(['project', 'workspaces', 'workspace', 'workflows', 'workflow', 'workflow-logs', 'workflow-log'])
+            ->toBe(['project', 'workspaces'])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => (string) $resource->uriTemplate())->values()->all())
             ->toBe([
                 'laborforest://projects/{uuid}',
                 'laborforest://projects/{uuid}/workspaces',
-                'laborforest://projects/{uuid}/workspaces/{slugKebab}',
-                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows',
-                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows/{name}',
-                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows/{name}/logs',
-                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows/{name}/logs/{id}',
             ]);
     });
 
@@ -84,7 +98,29 @@ describe('resources', function () {
 
         LaborForestServer::resource(ProjectsResource::class)
             ->assertOk()
-            ->assertSee(mcpJson([$beta->toMcpResource(), $alpha->toMcpResource()]));
+            ->assertSee(mcpJson([mcpProjectListing($beta), mcpProjectListing($alpha)]));
+    });
+
+    it('addresses each listed project by a uri the project template reads', function () {
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta');
+
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjects')->twice()->andReturn(collect([$project]));
+
+        LaborForestServer::resource(ProjectsResource::class)
+            ->assertOk()
+            ->assertSee('laborforest://projects/22222222-2222-2222-2222-222222222222');
+
+        // The listed uri is not merely well formed: it matches the template ProjectResource registers
+        $variables = (new ProjectResource)->uriTemplate()->match(
+            McpUri::PROJECT->build(['uuid' => $project->uuid]),
+        );
+
+        expect($variables)->toBe(['uuid' => $project->uuid]);
+
+        LaborForestServer::resource(ProjectResource::class, $variables)
+            ->assertOk()
+            ->assertSee(mcpJson($project->toMcpResource()));
     });
 
     it('reads an empty project list without erroring', function () {
@@ -128,81 +164,59 @@ describe('resources', function () {
     });
 });
 
-describe('run log resources', function () {
-    beforeEach(function () {
-        $this->uuid = '44444444-4444-4444-4444-444444444444';
-        $this->workspace = workflowWorkspaceData(fixtureWorkspacePath('repo-logs'));
+describe('tools', function () {
+    it('lists the registered tools', function () {
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
-        $this->mock(ProjectsService::class, function (MockInterface $mock) {
-            $mock->shouldReceive('loadProjects')
-                ->andReturn(collect([componentProjectData($this->uuid, '/tmp/repo')]));
-
-            $mock->shouldReceive('loadProjectWorkspaces')->andReturn(collect([$this->workspace]));
-        });
+        expect($context->tools()->map(fn (Tool $tool) => $tool->name())->values()->all())
+            ->toBe(['find-project-by-path']);
     });
 
-    it('lists only the runs of the named workflow, without their steps', function () {
-        LaborForestServer::resource(WorkflowLogsResource::class, [
-            'uuid' => $this->uuid,
-            'slugKebab' => 'repo-logs',
-            'name' => 'down',
-        ])
-            ->assertOk()
-            ->assertSee(mcpJson([
-                componentRunLogSummaryData(
-                    id: '20240102T000000Z_repo-logs_down',
-                    name: 'down',
-                    parent: '20240101T000000Z_repo-logs_up',
-                    timestamp: 1704153600,
-                    status: WorkflowStatus::FAILED,
-                    exception: 'Step [Stop the containers] failed.',
-                )->toMcpResource(),
-            ]))
-            ->assertDontSee('boom')
-            ->assertDontSee('docker compose down');
+    it('links to the project resource of a matching path', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjects')->once()->andReturn(collect([
+                componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/alpha'),
+                componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta'),
+            ]));
+
+        // The link content is invisible to assertSee(), which only reads text and blob content
+        $response = (new FindProjectByPathTool)->handle(new Request(['path' => '/tmp/beta']));
+
+        expect($response->content()->toArray())->toBe([
+            'type' => 'resource_link',
+            'uri' => 'laborforest://projects/22222222-2222-2222-2222-222222222222',
+            'name' => 'beta',
+            'title' => 'beta',
+            'description' => '/tmp/beta',
+            'mimeType' => 'application/json',
+        ]);
     });
 
-    it('lists no run for a workflow that has never run', function () {
-        LaborForestServer::resource(WorkflowLogsResource::class, [
-            'uuid' => $this->uuid,
-            'slugKebab' => 'repo-logs',
-            'name' => 'nothing-ran',
-        ])
-            ->assertOk()
-            ->assertSee('[]');
+    it('ignores a trailing slash on the requested path', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjects')->once()->andReturn(collect([
+                componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta'),
+            ]));
+
+        $response = (new FindProjectByPathTool)->handle(new Request(['path' => '/tmp/beta/']));
+
+        expect((string) $response->content())->toBe('laborforest://projects/22222222-2222-2222-2222-222222222222');
     });
 
-    it('reads a single run with the output of every step', function () {
-        LaborForestServer::resource(WorkflowLogResource::class, [
-            'uuid' => $this->uuid,
-            'slugKebab' => 'repo-logs',
-            'name' => 'down',
-            'id' => '20240102T000000Z_repo-logs_down',
-        ])
-            ->assertOk()
-            ->assertSee('Stop the containers')
-            ->assertSee('docker compose down')
-            ->assertSee('boom');
+    it('reports a path that matches no project', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjects')->once()->andReturn(collect());
+
+        LaborForestServer::tool(FindProjectByPathTool::class, ['path' => '/tmp/nope'])
+            ->assertHasErrors(['Failed to find project.']);
     });
 
-    it('reports a run log id that matches no run', function () {
-        LaborForestServer::resource(WorkflowLogResource::class, [
-            'uuid' => $this->uuid,
-            'slugKebab' => 'repo-logs',
-            'name' => 'down',
-            'id' => '20240108T000000Z_repo-logs_down',
-        ])
-            ->assertHasErrors(['Failed to load workflow log.']);
-    });
+    it('reports a projects file it cannot load', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjects')->once()->andThrow(new InvalidProjectsFile('.laborforest/projects.yaml', ['broken']));
 
-    it('refuses a run log addressed under another workflow name', function () {
-        LaborForestServer::resource(WorkflowLogResource::class, [
-            'uuid' => $this->uuid,
-            'slugKebab' => 'repo-logs',
-            'name' => 'up',
-            'id' => '20240102T000000Z_repo-logs_down',
-        ])
-            ->assertHasErrors(['Failed to load workflow log.']);
+        LaborForestServer::tool(FindProjectByPathTool::class, ['path' => '/tmp/beta'])
+            ->assertHasErrors(['Failed to find project.']);
     });
 });
 
@@ -214,4 +228,17 @@ describe('run log resources', function () {
 function mcpJson(array $payload): string
 {
     return json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * A project exactly as ProjectsResource lists it, addressed by the uri that reads it.
+ *
+ * @return array<string, mixed>
+ */
+function mcpProjectListing(ProjectData $project): array
+{
+    return [
+        'uri' => McpUri::PROJECT->build(['uuid' => $project->uuid]),
+        ...$project->toMcpResource(),
+    ];
 }

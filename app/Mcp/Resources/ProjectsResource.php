@@ -4,6 +4,7 @@ namespace App\Mcp\Resources;
 
 use App\Concerns\Mcp\RespondsWithJson;
 use App\Data\ProjectData;
+use App\Enums\McpUri;
 use App\Services\ProjectsService;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -18,7 +19,7 @@ use Laravel\Mcp\Server\Resource;
 #[Name('projects')]
 #[Title('Projects')]
 #[Description('The list of configured projects.')]
-#[Uri('laborforest://projects')]
+#[Uri(McpUri::PROJECTS->value)]
 #[MimeType('application/json')]
 class ProjectsResource extends Resource
 {
@@ -35,6 +36,9 @@ class ProjectsResource extends Resource
             return Response::error('Failed to load projects.');
         }
 
-        return $this->json($projects->map(fn (ProjectData $data) => $data->toMcpResource())->values()->all());
+        return $this->json($projects->map(fn (ProjectData $data): array => [
+            'uri' => McpUri::PROJECT->build(['uuid' => $data->uuid]),
+            ...$data->toMcpResource(),
+        ])->values()->all());
     }
 }
