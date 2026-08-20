@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Enums\McpUri;
 use App\Events\GlobalRefresh;
 use App\Services\ProjectsService;
@@ -21,6 +22,8 @@ use Throwable;
 #[Description('Add a new project by directory path. Must be a git repository.')]
 class AddProjectTool extends Tool
 {
+    use RegistersWhenWritable;
+
     /**
      * Handle the tool request.
      */

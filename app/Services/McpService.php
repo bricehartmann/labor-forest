@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Data\McpServerHealthData;
+use App\Data\SettingsData;
 use App\Enums\ChildProcessAlias;
 use App\Enums\HostEnvKey;
 use App\Enums\McpEndpoint;
@@ -12,7 +13,9 @@ use App\Exceptions\McpServerNotEnabled;
 use App\Exceptions\McpServerNotStopped;
 use App\Exceptions\McpServerUnhealthy;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Laravel\Mcp\Enums\ProtocolVersion;
 use Native\Desktop\Facades\ChildProcess;
 use stdClass;
@@ -47,6 +50,11 @@ class McpService
     protected const int HEALTH_CONNECT_TIMEOUT_SECONDS = 1;
 
     /**
+     * The memoized answer of isReadOnly().
+     */
+    protected ?bool $readOnly = null;
+
+    /**
      * Start the MCP server, unless it is already running.
      *
      * @throws McpServerNotEnabled when MCP is switched off in the settings
@@ -62,6 +70,10 @@ class McpService
 
         if (ChildProcess::get(ChildProcessAlias::MCP_SERVER->value)) {
             return;
+        }
+
+        if (blank($settings->mcp_token)) {
+            $this->regenerateMcpToken();
         }
 
         /**
@@ -92,6 +104,45 @@ class McpService
     }
 
     /**
+     * Whether the server publishes only the tools that change nothing.
+     *
+     * Memoized, because every tool asks on every request while the server builds its primitive
+     * list, and each answer would otherwise re-read and re-validate the settings file. The service
+     * is bound scoped for exactly this reason.
+     *
+     * A settings file that cannot be read answers false, so an unreadable file is never mistaken
+     * for a mode the user asked for.
+     */
+    public function isReadOnly(): bool
+    {
+        return $this->readOnly ??= rescue(
+            fn (): bool => app(SettingsService::class)->loadSettings()->mcp_read_only,
+            false,
+            report: false,
+        );
+    }
+
+    /**
+     * Write a fresh bearer token to the settings file and return it.
+     *
+     * Generated here rather than shipped as a default, so the token cannot be the same on two
+     * machines and so a settings file written before the token existed grows one on first start.
+     *
+     * @throws InvalidSettingsFile
+     */
+    public function regenerateMcpToken(): string
+    {
+        $settingsService = app(SettingsService::class);
+
+        $settings = $settingsService->loadSettings();
+        $settings->mcp_token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        $settingsService->saveSettings($settings);
+
+        return $settings->mcp_token;
+    }
+
+    /**
      * Complete an MCP initialize handshake against the endpoint the given port serves.
      *
      * The distinctions this draws are the ones a client cannot draw for the user. Claude Code maps
@@ -99,10 +150,12 @@ class McpService
      * NativePHP browser guard still sitting in front of the route is indistinguishable there from a
      * server that genuinely wants a token. Here it is named.
      *
-     * No NativePHP cookie or secret header is sent, deliberately: a 403 is the signal this check
-     * exists to surface, and authenticating the probe would hide it.
+     * The MCP bearer token is sent, so a correctly configured server answers HEALTHY rather than
+     * FORBIDDEN. No NativePHP cookie or secret header is sent, deliberately: a 403 from the browser
+     * guard is the signal this check exists to surface, and authenticating that far would hide it.
      *
      * @throws McpServerUnhealthy when the endpoint does not answer, or does not answer as an MCP server
+     * @throws InvalidSettingsFile
      */
     public function checkMcpServer(int $port): McpServerHealthData
     {
@@ -116,8 +169,11 @@ class McpService
             throw new McpServerUnhealthy(McpServerStatus::APP_PORT, $url);
         }
 
+        $token = app(SettingsService::class)->loadSettings()->mcp_token;
+
         try {
             $response = Http::withHeaders(['Accept' => 'application/json, text/event-stream'])
+                ->when(filled($token), fn (PendingRequest $request): PendingRequest => $request->withToken($token))
                 ->connectTimeout(static::HEALTH_CONNECT_TIMEOUT_SECONDS)
                 ->timeout(static::HEALTH_TIMEOUT_SECONDS)
                 ->post($url, [

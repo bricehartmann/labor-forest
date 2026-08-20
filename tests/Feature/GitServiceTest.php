@@ -42,8 +42,8 @@ describe('addWorktree', function () {
             ->and($worktree->branch)->toBe('feature')
             ->and($worktree->sha)->toBeNull()
             ->and($this->process->commands)->toBe([
-                ['git show-ref --verify --quiet "refs/heads/feature"', $this->repo],
-                ['git worktree add "/tmp/repo-feature" "feature"', $this->repo],
+                ["git show-ref --verify --quiet 'refs/heads/feature'", $this->repo],
+                ["git worktree add '/tmp/repo-feature' 'feature'", $this->repo],
             ]);
     });
 
@@ -59,9 +59,9 @@ describe('addWorktree', function () {
         expect($worktree->branch)->toBe('feature')
             ->and($worktree->path)->toBe($this->worktree)
             ->and($this->process->commands)->toBe([
-                ['git show-ref --verify --quiet "refs/heads/feature"', $this->repo],
-                ['git show-ref --verify --quiet "refs/heads/main"', $this->repo],
-                ['git worktree add -b "feature" "/tmp/repo-feature" "main"', $this->repo],
+                ["git show-ref --verify --quiet 'refs/heads/feature'", $this->repo],
+                ["git show-ref --verify --quiet 'refs/heads/main'", $this->repo],
+                ["git worktree add -b 'feature' '/tmp/repo-feature' 'main'", $this->repo],
             ]);
     });
 
@@ -74,7 +74,7 @@ describe('addWorktree', function () {
 
         $this->git->addWorktree($this->repo, $this->worktree, 'feature', 'main');
 
-        expect($this->process->commands[2][0])->toBe('git worktree add -b "feature" "/tmp/repo-feature" "main"');
+        expect($this->process->commands[2][0])->toBe("git worktree add -b 'feature' '/tmp/repo-feature' 'main'");
     });
 
     it('throws before running git when the workspace directory already exists', function () {
@@ -124,6 +124,32 @@ describe('addWorktree', function () {
         expect(fn () => $this->git->addWorktree($this->repo, $this->worktree, 'feature', 'main'))
             ->toThrow(GitOperationFailed::class, 'Failed to add worktree (new branch): fatal: could not create work tree dir');
     });
+
+    it('quotes a branch name that would otherwise carry a command of its own', function () {
+        // The branch reaches here from the `add-workspace` mcp tool. Double quotes would leave
+        // $(...) and backticks live for the shell that runs the composed command.
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+        ];
+
+        $this->git->addWorktree($this->repo, $this->worktree, 'feature; touch /tmp/pwned', null);
+
+        expect($this->process->commands[1][0])
+            ->toBe("git worktree add '/tmp/repo-feature' 'feature; touch /tmp/pwned'");
+    });
+
+    it('quotes a branch name carrying a single quote, so the quoting cannot be escaped', function () {
+        $this->process->responses = [
+            ['ok' => true],
+            ['ok' => true],
+        ];
+
+        $this->git->addWorktree($this->repo, $this->worktree, "feature'; touch /tmp/pwned; #", null);
+
+        expect($this->process->commands[1][0])
+            ->toBe("git worktree add '/tmp/repo-feature' 'feature'\\''; touch /tmp/pwned; #'");
+    });
 });
 
 describe('removeWorktree', function () {
@@ -131,7 +157,7 @@ describe('removeWorktree', function () {
         $this->git->removeWorktree($this->repo, $this->worktree, 'feature', false, false, false);
 
         expect($this->process->commands)->toBe([
-            ['git worktree remove /tmp/repo-feature', $this->worktree],
+            ["git worktree remove '/tmp/repo-feature'", $this->worktree],
         ]);
     });
 
@@ -139,7 +165,7 @@ describe('removeWorktree', function () {
         $this->git->removeWorktree($this->repo, $this->worktree, 'feature', true, false, false);
 
         expect($this->process->commands)->toBe([
-            ['git worktree remove --force /tmp/repo-feature', $this->worktree],
+            ["git worktree remove --force '/tmp/repo-feature'", $this->worktree],
         ]);
     });
 
@@ -147,15 +173,15 @@ describe('removeWorktree', function () {
         $this->git->removeWorktree($this->repo, $this->worktree, 'feature', false, true, false);
 
         expect($this->process->commands)->toBe([
-            ['git worktree remove /tmp/repo-feature', $this->worktree],
-            ['git branch --delete feature', $this->repo],
+            ["git worktree remove '/tmp/repo-feature'", $this->worktree],
+            ["git branch --delete 'feature'", $this->repo],
         ]);
     });
 
     it('force deletes the branch when asked', function () {
         $this->git->removeWorktree($this->repo, $this->worktree, 'feature', false, true, true);
 
-        expect($this->process->commands[1])->toBe(['git branch --delete --force feature', $this->repo]);
+        expect($this->process->commands[1])->toBe(["git branch --delete --force 'feature'", $this->repo]);
     });
 
     it('throws when the worktree removal fails and never deletes the branch', function () {
@@ -198,8 +224,8 @@ describe('removeLinkedWorktrees', function () {
 
         expect($this->process->commands)->toBe([
             ['git worktree list --porcelain', $this->repo],
-            ['git worktree remove --force /tmp/repo-feature', $this->worktree],
-            ['git worktree remove --force /tmp/repo-release', '/tmp/repo-release'],
+            ["git worktree remove --force '/tmp/repo-feature'", $this->worktree],
+            ["git worktree remove --force '/tmp/repo-release'", '/tmp/repo-release'],
         ]);
     });
 
@@ -211,7 +237,7 @@ describe('removeLinkedWorktrees', function () {
 
         $this->git->removeLinkedWorktrees($this->repo, false);
 
-        expect($this->process->commands[1])->toBe(['git worktree remove /tmp/repo-feature', $this->worktree]);
+        expect($this->process->commands[1])->toBe(["git worktree remove '/tmp/repo-feature'", $this->worktree]);
     });
 
     it('removes nothing when the repository only has a primary worktree', function () {
@@ -230,7 +256,7 @@ describe('removeLinkedWorktrees', function () {
 
         $this->git->removeLinkedWorktrees($this->repo, true);
 
-        expect($this->process->commands[1])->toBe(['git worktree remove --force /tmp/repo-detached', '/tmp/repo-detached']);
+        expect($this->process->commands[1])->toBe(["git worktree remove --force '/tmp/repo-detached'", '/tmp/repo-detached']);
     });
 
     it('throws without removing anything when the listing fails', function () {
@@ -567,7 +593,7 @@ describe('doesBranchExist', function () {
     it('is true when the ref resolves', function () {
         expect($this->git->doesBranchExist($this->repo, 'main'))->toBeTrue()
             ->and($this->process->commands)->toBe([
-                ['git show-ref --verify --quiet "refs/heads/main"', $this->repo],
+                ["git show-ref --verify --quiet 'refs/heads/main'", $this->repo],
             ]);
     });
 

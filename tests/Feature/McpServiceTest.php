@@ -1,5 +1,6 @@
 <?php
 
+use App\Data\SettingsData;
 use App\Enums\ChildProcessAlias;
 use App\Enums\HostEnvKey;
 use App\Enums\McpEndpoint;
@@ -8,12 +9,15 @@ use App\Exceptions\McpServerNotEnabled;
 use App\Exceptions\McpServerNotStopped;
 use App\Exceptions\McpServerUnhealthy;
 use App\Services\McpService;
+use App\Services\SettingsService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Mcp\Enums\ProtocolVersion;
 use Native\Desktop\Contracts\ChildProcess as ChildProcessContract;
+use Symfony\Component\Yaml\Yaml;
 use Tests\Fakes\ImpatientMcpService;
 
 beforeEach(function () {
@@ -191,6 +195,84 @@ describe('restartMcpServer', function () {
     });
 });
 
+describe('mcp token', function () {
+    it('writes a token on first start, since a settings file predating the server has none', function () {
+        ($this->writeSettings)(['mcp_enabled' => true, 'mcp_token' => null]);
+
+        $this->mock(ChildProcessContract::class, function ($mock) {
+            $mock->shouldReceive('get')->andReturnNull();
+            $mock->shouldReceive('artisan')->andReturnSelf();
+        });
+
+        $this->mcp->startMcpServer();
+
+        expect(Yaml::parse($this->disk->get($this->path))['mcp_token'])
+            ->toBeString()
+            ->toHaveLength(SettingsData::MCP_TOKEN_LENGTH);
+    });
+
+    it('leaves a token that already exists alone, so registered clients keep working', function () {
+        $token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        ($this->writeSettings)(['mcp_enabled' => true, 'mcp_token' => $token]);
+
+        $this->mock(ChildProcessContract::class, function ($mock) {
+            $mock->shouldReceive('get')->andReturnNull();
+            $mock->shouldReceive('artisan')->andReturnSelf();
+        });
+
+        $this->mcp->startMcpServer();
+
+        expect(Yaml::parse($this->disk->get($this->path))['mcp_token'])->toBe($token);
+    });
+
+    it('replaces the token when asked, and hands back the new one', function () {
+        $token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        ($this->writeSettings)(['mcp_token' => $token]);
+
+        $regenerated = $this->mcp->regenerateMcpToken();
+
+        expect($regenerated)->toHaveLength(SettingsData::MCP_TOKEN_LENGTH)
+            ->not->toBe($token)
+            ->and(Yaml::parse($this->disk->get($this->path))['mcp_token'])->toBe($regenerated);
+    });
+
+    it('writes the settings file so only its owner can read the token', function () {
+        ($this->writeSettings)();
+
+        $this->mcp->regenerateMcpToken();
+
+        expect($this->disk->getVisibility($this->path))->toBe('private');
+    });
+});
+
+describe('isReadOnly', function () {
+    it('answers what the settings file says', function (bool $readOnly) {
+        ($this->writeSettings)(['mcp_read_only' => $readOnly]);
+
+        expect($this->mcp->isReadOnly())->toBe($readOnly);
+    })->with(['on' => true, 'off' => false]);
+
+    it('reads the settings file once, however many tools ask', function () {
+        ($this->writeSettings)(['mcp_read_only' => true]);
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()
+            ->andReturn(new SettingsData(mcp_read_only: true));
+
+        expect($this->mcp->isReadOnly())->toBeTrue()
+            ->and($this->mcp->isReadOnly())->toBeTrue()
+            ->and($this->mcp->isReadOnly())->toBeTrue();
+    });
+
+    it('publishes every tool when the settings file cannot be read', function () {
+        $this->disk->put($this->path, "just a string\n");
+
+        expect($this->mcp->isReadOnly())->toBeFalse();
+    });
+});
+
 describe('checkMcpServer', function () {
     beforeEach(function () {
         $this->port = 9876;
@@ -213,6 +295,28 @@ describe('checkMcpServer', function () {
             ->server_name->toBe('LaborForest')
             ->server_version->toBe('1.2.3')
             ->protocol_version->toBe('2025-11-25');
+    });
+
+    it('presents the bearer token, so a guarded server answers rather than challenges', function () {
+        $token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        ($this->writeSettings)(['mcp_token' => $token]);
+
+        Http::fake([$this->url => Http::response(mcpInitializeReplyPayload())]);
+
+        $this->mcp->checkMcpServer($this->port);
+
+        Http::assertSent(fn (Request $request) => $request->hasHeader('Authorization', 'Bearer '.$token));
+    });
+
+    it('sends no token when the settings file holds none, rather than sending an empty one', function () {
+        ($this->writeSettings)(['mcp_token' => null]);
+
+        Http::fake([$this->url => Http::response(mcpInitializeReplyPayload())]);
+
+        $this->mcp->checkMcpServer($this->port);
+
+        Http::assertSent(fn (Request $request) => ! $request->hasHeader('Authorization'));
     });
 
     it('sends a json-rpc initialize accepting both json and an event stream', function () {

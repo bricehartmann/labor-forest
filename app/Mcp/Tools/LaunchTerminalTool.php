@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Concerns\Mcp\ResolvesWorkspace;
 use App\Services\LaunchService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -13,15 +14,14 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
-use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 use Throwable;
 
-#[IsReadOnly]
 #[Name('launch-terminal')]
 #[Title('Launch Terminal')]
 #[Description('Launch a terminal for the given workspace path using the preconfigured command.')]
 class LaunchTerminalTool extends Tool
 {
+    use RegistersWhenWritable;
     use ResolvesWorkspace;
 
     /**

@@ -102,10 +102,16 @@ files on disk; nothing here serves them, and nothing here reports on a run in fl
   Tools create and delete directories, remove worktrees, and run whatever shell commands the user's
   workflows contain. **Nothing on the LaborForest side asks the user to confirm a tool call.** Confirm
   `remove-project`, `run-workflow` and `purge-workflow-logs` with the user before calling them.
-- The server is local only, bound to `127.0.0.1`, and runs only while the LaborForest app is open. A
-  connection that stops answering usually means the app was quit or MCP was switched off.
-- `update-settings` cannot change `mcp_enabled` or `mcp_port`. The server will not move or switch itself
-  off underneath its own client; send the user to the app's Settings screen for those.
+- The server is local only, bound to `127.0.0.1`, requires the bearer token the user copied out of the
+  Settings screen, and runs only while the LaborForest app is open. A connection that stops answering
+  usually means the app was quit or MCP was switched off; one that starts refusing usually means the
+  token was regenerated.
+- The user can put the server in read-only mode, in which only `find-project-by-path` and
+  `validate-workflow` are published. A tool named here that is missing from the tool list is not a bug
+  to work around: say so, and send the user to the Settings screen.
+- `update-settings` cannot change `mcp_enabled`, `mcp_port`, `mcp_read_only` or the token. The server
+  will not move, unlock or switch itself off underneath its own client; send the user to the app's
+  Settings screen for those.
 - For the three launch commands, in both `update-settings` and `update-project-launch-commands`: omitting
   a field or passing `null` keeps the stored value, a string sets it, and an empty string clears it. A
   Project's override wins over the global command, and clearing an override falls back to the global one.

@@ -13,6 +13,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
@@ -138,6 +139,75 @@ describe('mcp server', function () {
                 $mock->shouldReceive('saveSettings');
             });
         };
+    });
+
+    it('shows a connect command carrying the bearer token', function () {
+        $token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')
+            ->andReturn(settingsPageSettingsData(mcpEnabled: true, mcpPort: 9876, mcpToken: $token));
+
+        Livewire::test(Settings::class)
+            ->assertSee(McpEndpoint::LABORFOREST->claudeAddCommand(9876, $token))
+            ->assertSee('Authorization: Bearer '.$token);
+    });
+
+    it('writes a new token and restarts the server when the token is regenerated', function () {
+        $token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+        $replacement = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')
+            ->andReturn(settingsPageSettingsData(mcpEnabled: true, mcpToken: $token));
+
+        $this->mock(McpService::class, function (MockInterface $mock) use ($replacement) {
+            $mock->shouldReceive('regenerateMcpToken')->once()->andReturn($replacement);
+            $mock->shouldReceive('restartMcpServer')->once();
+        });
+
+        Livewire::test(Settings::class)
+            ->callAction(TestAction::make('regenerate_mcp_token')->schemaComponent())
+            ->assertNotified('MCP token regenerated')
+            ->assertSee($replacement)
+            ->assertDontSee($token);
+    });
+
+    it('reports a token it could not regenerate, and leaves the shown one alone', function () {
+        $token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')
+            ->andReturn(settingsPageSettingsData(mcpEnabled: true, mcpToken: $token));
+
+        $this->mock(McpService::class)
+            ->shouldReceive('regenerateMcpToken')->once()
+            ->andThrow(new InvalidSettingsFile('.laborforest/settings.yaml', ['broken']));
+
+        Livewire::test(Settings::class)
+            ->callAction(TestAction::make('regenerate_mcp_token')->schemaComponent())
+            ->assertNotified('The MCP token could not be regenerated.')
+            ->assertSee($token);
+    });
+
+    it('saves read-only mode', function () {
+        $saved = null;
+
+        $this->mock(SettingsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadSettings')->andReturn(settingsPageSettingsData(mcpEnabled: true));
+            $mock->shouldReceive('saveSettings')->andReturnUsing(function (SettingsData $settings) use (&$saved) {
+                $saved = $settings;
+            });
+        });
+
+        $this->mock(McpService::class)->shouldReceive('startMcpServer', 'restartMcpServer', 'stopMcpServer');
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => true, 'mcp_port' => 9189, 'mcp_read_only' => true])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect($saved->mcp_read_only)->toBeTrue();
     });
 
     it('starts the server when mcp is switched on', function () {
@@ -493,11 +563,15 @@ function settingsPageSettingsData(
     ?string $terminal = 'open "{{ WORKSPACE_DIR }}" -a iterm',
     bool $mcpEnabled = true,
     int $mcpPort = 9189,
+    bool $mcpReadOnly = false,
+    ?string $mcpToken = null,
 ): SettingsData {
     return new SettingsData(
         dark_mode: $darkMode,
         mcp_enabled: $mcpEnabled,
         mcp_port: $mcpPort,
+        mcp_read_only: $mcpReadOnly,
+        mcp_token: $mcpToken,
         workflow_step_timeout_seconds: $workflowTimeoutSeconds,
         command_launch_ide: $ide,
         command_launch_browser: $browser,

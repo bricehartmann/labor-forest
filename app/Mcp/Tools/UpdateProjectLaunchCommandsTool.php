@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Concerns\Mcp\ResolvesProject;
 use App\Events\GlobalRefresh;
 use App\Rules\ValidVariables;
@@ -23,6 +24,7 @@ use Throwable;
 #[Description('Update the launch command overrides of a single project, which take precedence over the global launch commands.')]
 class UpdateProjectLaunchCommandsTool extends Tool
 {
+    use RegistersWhenWritable;
     use ResolvesProject;
 
     /**

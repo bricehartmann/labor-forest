@@ -15,16 +15,16 @@ trait ManagesFiles
         }
     }
 
-    protected function ensureFileExists(string $path, string $disk, ?string $contents = null): void
+    protected function ensureFileExists(string $path, string $disk, ?string $contents = null, bool $private = false): void
     {
         if (! Storage::disk($disk)->exists($path)) {
-            Storage::disk($disk)->put($path, $contents ?? '');
+            Storage::disk($disk)->put($path, $contents ?? '', ...($private ? ['private'] : []));
         }
     }
 
-    protected function ensureBaseFileExists(string $file, ?string $contents = null): void
+    protected function ensureBaseFileExists(string $file, ?string $contents = null, bool $private = false): void
     {
-        $this->ensureFileExists($this->makeRelativeBasePath($file), Disk::USER_HOME->value, $contents);
+        $this->ensureFileExists($this->makeRelativeBasePath($file), Disk::USER_HOME->value, $contents, $private);
     }
 
     protected function baseFileExists(string $file): bool
@@ -37,9 +37,19 @@ trait ManagesFiles
         Storage::disk(Disk::USER_HOME->value)->delete($this->makeRelativeBasePath($file));
     }
 
-    protected function putBaseFile(string $file, string $contents): void
+    /**
+     * Write a file to the base directory.
+     *
+     * `private` maps to mode 0600 on the local driver, which is what a file holding a credential
+     * wants — the default 0644 is readable by every other account on the machine.
+     */
+    protected function putBaseFile(string $file, string $contents, bool $private = false): void
     {
-        Storage::disk(Disk::USER_HOME->value)->put($this->makeRelativeBasePath($file), $contents);
+        Storage::disk(Disk::USER_HOME->value)->put(
+            $this->makeRelativeBasePath($file),
+            $contents,
+            ...($private ? ['private'] : []),
+        );
     }
 
     protected function getBaseFile(string $file): string

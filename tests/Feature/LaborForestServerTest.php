@@ -49,6 +49,7 @@ use App\Services\SettingsService;
 use App\Services\WorkflowService;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Prompt;
@@ -88,7 +89,9 @@ it('tells connecting clients what the server is for and what it will not do', fu
         // nothing else warns that a tool call runs the user's shell unprompted
         ->toContain('Nothing on the LaborForest side asks the user to confirm a tool call.')
         // the settings the server refuses to change out from under its own client
-        ->toContain('cannot change `mcp_enabled` or `mcp_port`')
+        ->toContain('cannot change `mcp_enabled`, `mcp_port`, `mcp_read_only` or the token')
+        // a short tool list is a mode the user chose, not something to route around
+        ->toContain('read-only mode')
         // no tool writes a workflow file, so the grammar has to be fetched before one is written
         ->toContain('laborforest://workflow-schema')
         // the run logs are files on disk, because nothing here serves them
@@ -144,6 +147,20 @@ describe('resources', function () {
         LaborForestServer::resource(SettingsResource::class)
             ->assertOk()
             ->assertSee(mcpJson($settings->toMcpResource()));
+    });
+
+    it('withholds the bearer token, which a client that got this far already holds', function () {
+        $settings = new SettingsData(mcp_token: Str::random(SettingsData::MCP_TOKEN_LENGTH));
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()->andReturn($settings);
+
+        LaborForestServer::resource(SettingsResource::class)
+            ->assertOk()
+            ->assertDontSee($settings->mcp_token);
+
+        expect($settings->toMcpResource())->not->toHaveKey('mcp_token')
+            ->and($settings->toMcpResource())->toHaveKey('mcp_read_only');
     });
 
     it('reports a settings file it cannot load', function () {
@@ -483,6 +500,9 @@ describe('prompts', function () {
 
 describe('tools', function () {
     it('lists the registered tools', function () {
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()->andReturn(mcpWritableSettings());
+
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
         expect($context->tools()->map(fn (Tool $tool) => $tool->name())->values()->all())
@@ -502,6 +522,57 @@ describe('tools', function () {
                 'purge-workflow-logs',
             ]);
     });
+
+    it('publishes only the tools that change nothing while read-only mode is on', function () {
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()
+            ->andReturn(new SettingsData(mcp_read_only: true));
+
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
+
+        expect($context->tools()->map(fn (Tool $tool) => $tool->name())->values()->all())
+            ->toBe([
+                'find-project-by-path',
+                'validate-workflow',
+            ]);
+    });
+
+    it('counts the launch tools as writes, since they spawn a command the user configured', function () {
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()
+            ->andReturn(new SettingsData(mcp_read_only: true));
+
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
+
+        expect($context->tools()->map(fn (Tool $tool) => $tool->name())->values()->all())
+            ->not->toContain('launch-ide', 'launch-terminal', 'launch-browser');
+    });
+
+    it('publishes every tool when the settings file cannot be read, rather than a shortened list', function () {
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()
+            ->andThrow(new InvalidSettingsFile('.laborforest/settings.yaml', ['broken']));
+
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
+
+        expect($context->tools())->toHaveCount(13);
+    });
+
+    it('marks running a workflow destructive, because a step is arbitrary shell', function () {
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
+
+        $annotations = $context->tools()->first(fn (Tool $tool) => $tool->name() === 'run-workflow')->annotations();
+
+        expect($annotations['destructiveHint'] ?? null)->toBeTrue();
+    });
+
+    it('does not call a launch tool read-only, which would tell a client there is nothing to confirm', function (string $name) {
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
+
+        $annotations = $context->tools()->first(fn (Tool $tool) => $tool->name() === $name)->annotations();
+
+        expect($annotations['readOnlyHint'] ?? false)->toBeFalse();
+    })->with(['launch-ide', 'launch-terminal', 'launch-browser']);
 
     it('links to the project resource of a matching path', function () {
         $this->mock(ProjectsService::class)
@@ -983,8 +1054,8 @@ describe('tools', function () {
         });
 
         $this->mock(SettingsService::class)
-            ->shouldReceive('loadSettings')->once()
-            ->andReturn(new SettingsData(workflow_step_timeout_seconds: 45));
+            ->shouldReceive('loadSettings')->twice()
+            ->andReturn(mcpWritableSettings(new SettingsData(workflow_step_timeout_seconds: 45)));
 
         $this->mock(WorkflowService::class, function (MockInterface $mock) use ($workflowPath) {
             $mock->shouldReceive('workflowPath')->once()->with('/tmp/repo-feature', 'up')->andReturn($workflowPath);
@@ -1031,7 +1102,7 @@ describe('tools', function () {
         });
 
         $this->mock(SettingsService::class)
-            ->shouldReceive('loadSettings')->once()->andReturn(new SettingsData);
+            ->shouldReceive('loadSettings')->twice()->andReturn(mcpWritableSettings(new SettingsData));
 
         $this->mock(WorkflowService::class, function (MockInterface $mock) use ($workflowPath) {
             $mock->shouldReceive('workflowPath')->once()->andReturn($workflowPath);
@@ -1063,7 +1134,7 @@ describe('tools', function () {
         $saved = null;
 
         $this->mock(SettingsService::class, function (MockInterface $mock) use (&$saved) {
-            $mock->shouldReceive('loadSettings')->once()->andReturn(SettingsData::defaults());
+            $mock->shouldReceive('loadSettings')->twice()->andReturn(mcpWritableSettings());
             $mock->shouldReceive('saveSettings')->once()
                 ->andReturnUsing(function (SettingsData $settings) use (&$saved) {
                     $saved = $settings;
@@ -1093,7 +1164,7 @@ describe('tools', function () {
         $saved = null;
 
         $this->mock(SettingsService::class, function (MockInterface $mock) use (&$saved) {
-            $mock->shouldReceive('loadSettings')->once()->andReturn(SettingsData::defaults());
+            $mock->shouldReceive('loadSettings')->twice()->andReturn(mcpWritableSettings());
             $mock->shouldReceive('saveSettings')->once()
                 ->andReturnUsing(function (SettingsData $settings) use (&$saved) {
                     $saved = $settings;
@@ -1132,7 +1203,7 @@ describe('tools', function () {
         Event::fake([GlobalRefresh::class]);
 
         $this->mock(SettingsService::class)
-            ->shouldReceive('loadSettings')->once()
+            ->shouldReceive('loadSettings')->twice()
             ->andThrow(new InvalidSettingsFile('.laborforest/settings.yaml', ['broken']));
 
         LaborForestServer::tool(UpdateSettingsTool::class, ['dark_mode' => false])
@@ -1147,7 +1218,7 @@ describe('tools', function () {
         $saved = null;
 
         $this->mock(SettingsService::class, function (MockInterface $mock) use (&$saved) {
-            $mock->shouldReceive('loadSettings')->once()->andReturn(SettingsData::defaults());
+            $mock->shouldReceive('loadSettings')->twice()->andReturn(mcpWritableSettings());
             $mock->shouldReceive('saveSettings')->once()
                 ->andReturnUsing(function (SettingsData $settings) use (&$saved) {
                     $saved = $settings;
@@ -1499,4 +1570,19 @@ function mcpWorkspaceIsResolved(): void
         $mock->shouldReceive('loadProjectFromWorkspace')->once()->with('/tmp/repo-feature')
             ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
     });
+}
+
+/**
+ * Settings with MCP in the writable mode a mutating tool needs to be registered at all.
+ *
+ * Read-only is the default a fresh settings file carries, so a test exercising a write tool has to
+ * say so rather than inherit it.
+ */
+function mcpWritableSettings(?SettingsData $settings = null): SettingsData
+{
+    $settings ??= SettingsData::defaults();
+
+    $settings->mcp_read_only = false;
+
+    return $settings;
 }

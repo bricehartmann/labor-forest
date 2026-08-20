@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Concerns\Mcp\ResolvesWorkspace;
 use App\Events\GlobalRefresh;
 use App\Services\SettingsService;
@@ -16,13 +17,16 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 use Throwable;
 
+#[IsDestructive]
 #[Name('run-workflow')]
 #[Title('Run Workflow')]
 #[Description('Dispatch a local workflow to run within a workspace by path. Every step of the workflow runs. Returns the unique workflow ID on success.')]
 class RunWorkflowTool extends Tool
 {
+    use RegistersWhenWritable;
     use ResolvesWorkspace;
 
     /**

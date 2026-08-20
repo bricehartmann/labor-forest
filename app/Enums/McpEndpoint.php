@@ -14,6 +14,17 @@ enum McpEndpoint: string
      */
     public const string HOST = '127.0.0.1';
 
+    /**
+     * The host names a request may legitimately arrive under.
+     *
+     * `Host` is what a DNS-rebound request gives itself away with: the browser resolves the
+     * attacker's own name to 127.0.0.1, which makes the request same-origin and skips the CORS
+     * preflight, but the name still travels in the header.
+     *
+     * @var list<string>
+     */
+    public const array LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '[::1]', '::1'];
+
     case LABORFOREST = 'mcp/laborforest';
 
     /**
@@ -42,9 +53,18 @@ enum McpEndpoint: string
 
     /**
      * The one-liner that registers this endpoint with Claude Code.
+     *
+     * The token is passed as a header rather than in the URL, because Claude Code stores the whole
+     * command in its own config and a URL is the part that ends up in logs and error messages.
      */
-    public function claudeAddCommand(int $port): string
+    public function claudeAddCommand(int $port, ?string $token = null): string
     {
-        return 'claude mcp add --transport http '.$this->clientName().' --scope user '.$this->url($port);
+        $command = 'claude mcp add --transport http '.$this->clientName().' --scope user '.$this->url($port);
+
+        if (blank($token)) {
+            return $command;
+        }
+
+        return $command.' --header "Authorization: Bearer '.$token.'"';
     }
 }

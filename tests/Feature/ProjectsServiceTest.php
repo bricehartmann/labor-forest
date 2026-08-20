@@ -234,7 +234,7 @@ describe('removeProject', function () {
 
         expect($this->process->commands)->toBe([
             ['git worktree list --porcelain', $this->repo],
-            ['git worktree remove --force '.$this->worktree, $this->worktree],
+            ["git worktree remove --force '{$this->worktree}'", $this->worktree],
         ])
             ->and(Yaml::parse($this->disk->get($this->path)))->toBe([]);
     });
@@ -438,8 +438,8 @@ describe('addProjectWorkspace', function () {
             ->and($workspace->status)->toBe(WorkspaceStatus::SUSPENDED)
             ->and($workspace->git_status)->toBe(GitStatus::CLEAN)
             ->and($this->process->commands)->toBe([
-                ['git show-ref --verify --quiet "refs/heads/feature/new thing"', $this->repo],
-                ['git worktree add "/tmp/repo-feature-new-thing" "feature/new thing"', $this->repo],
+                ["git show-ref --verify --quiet 'refs/heads/feature/new thing'", $this->repo],
+                ["git worktree add '/tmp/repo-feature-new-thing' 'feature/new thing'", $this->repo],
                 ['git worktree list --porcelain', $this->repo],
                 ['git status --porcelain', '/tmp/repo-feature-new-thing'],
             ])

@@ -4,9 +4,9 @@
 
 LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). An agent that connects to it can list your Projects and Workspaces, create and remove git worktrees, seed workflows into a Workspace, check those workflow files over without running them, run them, delete the run logs they leave behind, open your IDE, terminal or browser against a Workspace, and change both the global settings and a single Project's launch command overrides.
 
-The server is local. It listens on `127.0.0.1` only, it runs as a child process of the app for as long as the app is open, and it is enabled by default on port `9189`. The toggle, the port, the `Add to Claude Code` command and the `Test connection` button all live on the [Settings](settings.md) screen.
+The server is local. It listens on `127.0.0.1` only, it runs as a child process of the app for as long as the app is open, and it is off until you switch it on. When you do, it starts on port `9189` in read-only mode, publishing only the tools that change nothing. The toggle, the read-only switch, the port, the `Add to Claude Code` command, the `Regenerate token` action and the `Test connection` button all live on the [Settings](settings.md) screen.
 
-Connecting an agent to LaborForest gives that agent the ability to create and destroy directories on your machine and to run arbitrary shell commands through your workflows, under your own user account. Nothing asks you to confirm a tool call on the LaborForest side.
+Turning read-only off gives a connected agent the ability to create and destroy directories on your machine and to run arbitrary shell commands through your workflows, under your own user account. Nothing asks you to confirm a tool call on the LaborForest side.
 
 ## Connecting
 
@@ -15,12 +15,14 @@ The endpoint is `http://127.0.0.1:9189/mcp/laborforest`, over the streamable HTT
 For Claude Code, the `Add to Claude Code` field on the Settings screen is the whole registration:
 
 ```shell
-claude mcp add --transport http laborforest --scope user http://127.0.0.1:9189/mcp/laborforest
+claude mcp add --transport http laborforest --scope user http://127.0.0.1:9189/mcp/laborforest --header "Authorization: Bearer <token>"
 ```
 
-Any other client that speaks HTTP MCP connects to the same URL. There is no authentication of any kind in front of the route, and no token to configure. Any process on your machine that can reach the loopback port can call every tool, so the only thing keeping the server private is that it never leaves `127.0.0.1`.
+Any other client that speaks HTTP MCP connects to the same URL and must present the same bearer token. The token is generated the first time the server starts and lives in `~/.laborforest/settings.yaml`, which is written readable by you alone. Copy the command from the Settings screen rather than retyping it, and treat it as a secret — it carries the token. `Regenerate token` writes a new one and restarts the server; every client registered with the old one has to be added again.
 
-The app window is served by its own process, which does refuse requests that do not come from the app itself. That guard is removed inside the MCP process alone, because no MCP client can satisfy it.
+Loopback is not on its own a boundary. Every program running as you can reach the port, and the tools behind it reach your shell, so the token is what actually decides who gets in. Requests are refused for three separate reasons: a missing or wrong token, a `Host` or `Origin` naming anything but the loopback interface — which is how a DNS-rebound request from a web page gives itself away — and more than 120 requests a minute.
+
+The app window is served by its own process, which refuses requests that do not come from the app itself. That guard is swapped out inside the MCP process alone, because no MCP client can satisfy it; what replaces it answers `404` to every path but the MCP endpoint, so the app's own UI is not served on the MCP port.
 
 ## Use cases
 
@@ -61,23 +63,25 @@ The `projects` list is ordered by when each Project was last opened. It answers 
 
 ## Tools
 
-| Tool                              | Annotation  | Arguments                                                               | Returns                        |
-|-----------------------------------|-------------|-------------------------------------------------------------------------|--------------------------------|
-| `find-project-by-path`            | read-only   | `path`                                                                  | A link to the Project resource |
-| `launch-ide`                      | read-only   | `path` to a Workspace                                                   | `success`                      |
-| `launch-terminal`                 | read-only   | `path` to a Workspace                                                   | `success`                      |
-| `launch-browser`                  | read-only   | `path` to a Workspace                                                   | `success`                      |
-| `add-project`                     |             | `path`                                                                  | A link to the Project resource |
-| `remove-project`                  | destructive | `uuid`, `remove_directory`, `remove_worktrees`                          | `success`                      |
-| `add-workspace`                   |             | `path` or `uuid`, `branch`, `base_branch`                               | `success`                      |
-| `add-workspace-example-workflows` |             | `path` to a Workspace, `example`                                        | `success`                      |
-| `validate-workflow`               | read-only   | `path` to a Workspace, `workflow`                                       | The workflow file it read      |
-| `run-workflow`                    |             | `path` to a Workspace, `workflow`                                       | The workflow run log ID        |
-| `update-settings`                 | destructive | `dark_mode`, `workflow_step_timeout_seconds`, the three launch commands | `success`                      |
-| `update-project-launch-commands`  | destructive | `path` or `uuid`, the three launch commands                             | `success`                      |
-| `purge-workflow-logs`             | destructive | `path` to a Workspace, `workflow`                                       | What it purged and skipped     |
+| Tool                              | Annotation  | Read-only mode | Arguments                                                               | Returns                        |
+|-----------------------------------|-------------|----------------|-------------------------------------------------------------------------|--------------------------------|
+| `find-project-by-path`            | read-only   | published      | `path`                                                                  | A link to the Project resource |
+| `validate-workflow`               | read-only   | published      | `path` to a Workspace, `workflow`                                       | The workflow file it read      |
+| `launch-ide`                      |             | withheld       | `path` to a Workspace                                                   | `success`                      |
+| `launch-terminal`                 |             | withheld       | `path` to a Workspace                                                   | `success`                      |
+| `launch-browser`                  |             | withheld       | `path` to a Workspace                                                   | `success`                      |
+| `add-project`                     |             | withheld       | `path`                                                                  | A link to the Project resource |
+| `remove-project`                  | destructive | withheld       | `uuid`, `remove_directory`, `remove_worktrees`                          | `success`                      |
+| `add-workspace`                   |             | withheld       | `path` or `uuid`, `branch`, `base_branch`                               | `success`                      |
+| `add-workspace-example-workflows` |             | withheld       | `path` to a Workspace, `example`                                        | `success`                      |
+| `run-workflow`                    | destructive | withheld       | `path` to a Workspace, `workflow`                                       | The workflow run log ID        |
+| `update-settings`                 | destructive | withheld       | `dark_mode`, `workflow_step_timeout_seconds`, the three launch commands | `success`                      |
+| `update-project-launch-commands`  | destructive | withheld       | `path` or `uuid`, the three launch commands                             | `success`                      |
+| `purge-workflow-logs`             | destructive | withheld       | `path` to a Workspace, `workflow`                                       | What it purged and skipped     |
 
-The annotation is what the client is told about the tool before it calls it. A client that asks you to approve destructive tool calls will ask about `remove-project`, `update-settings`, `update-project-launch-commands` and `purge-workflow-logs`. The three launch tools are annotated read-only because they change nothing in LaborForest, even though they do start an application.
+The annotation is what the client is told about the tool before it calls it. A client that asks you to approve destructive tool calls will ask about `run-workflow`, `remove-project`, `update-settings`, `update-project-launch-commands` and `purge-workflow-logs`. The three launch tools carry no annotation: they change nothing in LaborForest, but they do run a command you configured, and calling them read-only would tell a client there is nothing to ask you about.
+
+`Read-only mode` is which tools the server publishes at all while the read-only switch on the [Settings](settings.md) screen is on, which is where a newly enabled server starts.
 
 ### Finding and adding Projects
 
@@ -175,7 +179,9 @@ Failures to connect at all are a different matter, because most clients report a
 
 The server binds to `127.0.0.1` and cannot be moved to another interface. There is no configuration for exposing it on a network, and the endpoint is plain HTTP, which is correct for a loopback address.
 
-There is no authentication, no rate limiting and no per-tool gating. Every tool is exposed whenever the server is running; there is no way to publish a read-only subset.
+Authentication is a single bearer token, shared by every client. There are no per-client tokens, no scopes and no per-tool permissions: read-only mode is the only gate, and it is all-or-nothing across the tools that change something. A client that was connected when you change the mode may keep showing the tool list it first saw until it reconnects.
+
+Read-only mode counts `launch-ide`, `launch-terminal` and `launch-browser` as changes, because they run a command you configured, even though nothing inside LaborForest moves.
 
 The server runs only while the app does. Disabling MCP stops the process outright, and a client then finds nothing listening rather than a server that answers with fewer tools. Changing the port stops the process and starts a new one on the new port.
 

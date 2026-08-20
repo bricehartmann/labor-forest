@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Concerns\Mcp\ResolvesProject;
 use App\Events\GlobalRefresh;
 use App\Services\GitService;
@@ -21,6 +22,7 @@ use Throwable;
 #[Description('Add a new workspace for an existing project for either a new or existing git branch.')]
 class AddWorkspaceTool extends Tool
 {
+    use RegistersWhenWritable;
     use ResolvesProject;
 
     /**

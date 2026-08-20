@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Events\GlobalRefresh;
 use App\Rules\ValidVariables;
 use App\Services\SettingsService;
@@ -22,6 +23,8 @@ use Throwable;
 #[Description('Update global configuration settings.')]
 class UpdateSettingsTool extends Tool
 {
+    use RegistersWhenWritable;
+
     /**
      * Handle the tool request.
      */

@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Concerns\Mcp\ResolvesWorkspace;
 use App\Events\GlobalRefresh;
 use App\Services\ProjectsService;
@@ -21,6 +22,7 @@ use Throwable;
 #[Description('Add example workflows for a workspace.')]
 class AddWorkspaceExampleWorkflowsTool extends Tool
 {
+    use RegistersWhenWritable;
     use ResolvesWorkspace;
 
     /**

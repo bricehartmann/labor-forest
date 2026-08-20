@@ -47,14 +47,15 @@ enum McpServerStatus: string
      *
      * The wording matters more than usual here, because every one of these states reaches an MCP
      * client as either a missing server or a request to authenticate. FORBIDDEN especially: a client
-     * cannot tell NativePHP's browser guard apart from a server that genuinely wants a token.
+     * cannot tell NativePHP's browser guard apart from a rejected token apart from a foreign server
+     * that guards its own port.
      */
     public function message(string $url, ?int $httpStatus = null): string
     {
         return match ($this) {
             self::HEALTHY => "{$url} completed an MCP handshake.",
             self::UNREACHABLE => "Nothing answered at {$url}. Either the server is not running, or it is running on a different port.",
-            self::FORBIDDEN => "{$url} answered {$httpStatus}. Either NativePHP's browser guard is still in front of the route, or another application owns that port. An MCP client reports this as a request to authenticate.",
+            self::FORBIDDEN => "{$url} answered {$httpStatus}. The bearer token was rejected, NativePHP's browser guard is still in front of the route, or another application owns that port. An MCP client reports this as a request to authenticate.",
             self::FOREIGN => "{$url} answered, but not with an MCP handshake. Another application is using that port.",
             self::FAILED => "{$url} answered {$httpStatus}.",
             self::APP_PORT => "{$url} is the port the app window itself is served on. Pick another port.",

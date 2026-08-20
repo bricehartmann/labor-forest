@@ -44,6 +44,15 @@ class Settings extends Page
     #[Locked]
     public ?string $loadedInvalidMessage = null;
 
+    /**
+     * The bearer token the connect command carries.
+     *
+     * Held on the page rather than in the form, because it is not something the user edits and a
+     * form field would carry it into every saved settings write for no reason.
+     */
+    #[Locked]
+    public ?string $mcpToken = null;
+
     protected string $view = 'filament.pages.settings';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::Cog8Tooth;
@@ -56,6 +65,8 @@ class Settings extends Page
             $settings = new SettingsData;
             $this->loadedInvalidMessage = $e->messagesAsString();
         }
+
+        $this->mcpToken = $settings->mcp_token;
 
         $this->form->fill($settings->toArray());
     }
@@ -91,12 +102,16 @@ class Settings extends Page
                     ->description('Configure the local MCP server.')
                     ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
                     ->schema([
-                        Grid::make(3)
+                        Grid::make(4)
                             ->schema([
                                 Toggle::make('mcp_enabled')
                                     ->label('Enable MCP')
                                     ->inline(false)
                                     ->live(),
+                                Toggle::make('mcp_read_only')
+                                    ->label('Read only')
+                                    ->disabled(fn (Get $get) => ! $get('mcp_enabled'))
+                                    ->inline(false),
                                 TextInput::make('mcp_port')
                                     ->disabled(fn (Get $get) => ! $get('mcp_enabled'))
                                     ->label('MCP local port')
@@ -119,12 +134,23 @@ class Settings extends Page
                             ]),
                         TextEntry::make('mcp_claude_command')
                             ->label('Add to Claude Code')
-                            ->helperText('Run this in a terminal to register the server. Click to copy.')
+                            ->helperText('Run this in a terminal to register the server. It carries the bearer token, so treat it as a secret. Click to copy.')
                             ->visible(fn (Get $get): bool => (bool) $get('mcp_enabled') && filled($get('mcp_port')))
-                            ->state(fn (Get $get): string => McpEndpoint::LABORFOREST->claudeAddCommand($get->integer('mcp_port')))
+                            ->state(fn (Get $get): string => McpEndpoint::LABORFOREST->claudeAddCommand($get->integer('mcp_port'), $this->mcpToken))
                             ->fontFamily(FontFamily::Mono)
                             ->copyable()
                             ->copyMessage('Command copied'),
+                        Actions::make([
+                            Action::make('regenerate_mcp_token')
+                                ->label('Regenerate token')
+                                ->icon(Heroicon::ArrowPath)
+                                ->link()
+                                ->requiresConfirmation()
+                                ->modalHeading('Regenerate the MCP token?')
+                                ->modalDescription('Every client registered with the current token stops working until it is added again with the new one.')
+                                ->action(fn () => $this->regenerateMcpToken()),
+                        ])
+                            ->visible(fn (Get $get): bool => (bool) $get('mcp_enabled')),
                     ]),
                 Section::make('Launch commands')
                     ->description(new HtmlString('Commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Each command can be overridden at the project level.'))
@@ -271,6 +297,30 @@ class Settings extends Page
      * Reporting is switched off: every throwable this can produce is the diagnosis the user asked
      * for rather than a defect, and a user retrying a stopped server would otherwise fill the log.
      */
+    /**
+     * Write a new bearer token and restart the server so the running process reads it.
+     *
+     * The token is only consulted per request, so a restart is not strictly needed — but a token
+     * that has changed under a running server is exactly the state a user would not think to
+     * suspect, and the restart costs nothing.
+     */
+    protected function regenerateMcpToken(): void
+    {
+        static::resultNotificationOperation(
+            callback: function (): void {
+                $mcp = app(McpService::class);
+
+                $this->mcpToken = $mcp->regenerateMcpToken();
+
+                rescue(fn () => $mcp->restartMcpServer());
+            },
+            successTitle: 'MCP token regenerated',
+            successBody: 'Add the server to your MCP clients again with the new command.',
+            failureTitle: 'The MCP token could not be regenerated.',
+            failureBody: fn (Throwable $th): string => $th->getMessage(),
+        );
+    }
+
     protected function testMcpConnection(int $port): void
     {
         static::resultNotificationOperation(

@@ -42,7 +42,9 @@ describe('loadSettings', function () {
         expect($settings->dark_mode)->toBeFalse()
             ->and($settings->command_launch_ide)->toBe(SettingsData::defaults()->command_launch_ide)
             ->and($settings->workflow_step_timeout_seconds)->toBe(600)
-            ->and($settings->mcp_enabled)->toBeTrue()
+            // a settings file written before the mcp server existed opts into nothing
+            ->and($settings->mcp_enabled)->toBeFalse()
+            ->and($settings->mcp_read_only)->toBeTrue()
             ->and($settings->mcp_port)->toBe(9189);
     });
 
@@ -129,8 +131,10 @@ describe('saveSettings', function () {
             'dark_mode' => false,
             'cli_tools_installed' => false,
             'workflow_step_timeout_seconds' => 45,
-            'mcp_enabled' => true,
+            'mcp_enabled' => false,
             'mcp_port' => 9189,
+            'mcp_read_only' => true,
+            'mcp_token' => null,
             'command_launch_ide' => null,
             'command_launch_browser' => null,
             'command_launch_terminal' => null,
@@ -159,6 +163,8 @@ describe('syncSettingsFile', function () {
             'workflow_step_timeout_seconds',
             'mcp_enabled',
             'mcp_port',
+            'mcp_read_only',
+            'mcp_token',
             'command_launch_ide',
             'command_launch_browser',
             'command_launch_terminal',

@@ -65,6 +65,23 @@ Both drain paths call `CliToolsService::runPendingCommand()`, which returns the 
 
 `pullPendingCommand()` deletes `pending.yaml` before parsing it, so a malformed file cannot wedge every future launch and a deeplink arriving after the boot drain finds nothing left to run.
 
+### MCP server
+
+`routes/ai.php` registers one `Mcp::web` server (`app/Mcp/Servers/LaborForestServer.php`) at `McpEndpoint::LABORFOREST`. It is **not** served by the app window's process: `McpService::startMcpServer()` spawns a second Laravel HTTP server as a persistent NativePHP child — `artisan serve --no-reload --host=127.0.0.1 --port={mcp_port}` — with `LABORFOREST_MCP_SERVER=1` in its environment. `--no-reload` is load-bearing (see the docblock: ServeCommand's `$passthroughVariables` would otherwise drop every `NATIVEPHP_*` key from the process that actually answers requests).
+
+`artisan serve` serves the *whole* application, and the Filament panel sits at `->path('')` with no auth guard, so the security of that port is entirely in middleware:
+
+- `AppServiceProvider::allowExternalAccessToMcpServer()` **swaps** NativePHP's `PreventRegularBrowserAccess` for `AllowOnlyMcpRequests`, which 404s every path but the MCP endpoint. Swap, never remove — removing it publishes the app UI on the MCP port.
+- `EnsureMcpRequestIsLocal` rejects a `Host` or `Origin` that is not loopback. This is the MCP spec's DNS-rebinding requirement: rebinding makes an attacker's page same-origin, so no CORS preflight happens, but the attacker's name still travels in `Host`. A loopback `Origin` passes because `mcp:inspector` is a browser app.
+- `EnsureMcpTokenIsValid` compares `bearerToken()` against `SettingsData::$mcp_token` with `hash_equals`, 401 (not 403) so the package's `AddWwwAuthenticateHeader` reads as a challenge. A blank stored token denies everything.
+- `throttle:mcp`, defined in `AppServiceProvider::boot()`.
+
+The token is generated lazily by `McpService::startMcpServer()` and lives in `settings.yaml`, which `SettingsService::saveSettings()` writes `private` (0600). It is deliberately **not** encrypted: `APP_KEY` ships world-readable inside the app bundle and is identical on every install, so `encrypt()` would put the lock beside its key; the file mode is what actually excludes another account. `SettingsData::toMcpResource()` withholds the token so it never reaches a transcript.
+
+Defaults are closed: `mcp_enabled = false`, `mcp_read_only = true`. Read-only is enforced by `shouldRegister()` from `Concerns\Mcp\RegistersWhenWritable`, applied to every tool that changes anything — including the three `Launch*Tool`s, which spawn a user-configured command. The answer is memoized by `McpService::isReadOnly()`, and `McpService` is bound **scoped** in `AppServiceProvider::register()` for exactly that reason: without it, each of the 11 gated tools re-parses `settings.yaml` on every request. It fails open (an unreadable settings file publishes everything) so a broken file never looks like a deliberately short tool list.
+
+Tool annotations are what a client gates its confirmation prompts on, so they are not decorative: `run-workflow` is `#[IsDestructive]` because a step is arbitrary shell, and the launch tools carry *no* annotation rather than `#[IsReadOnly]`.
+
 ### Services (`app/Services/`)
 
 - `GitService` — worktree/branch/status operations via the git CLI

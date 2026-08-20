@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Events\GlobalRefresh;
 use App\Services\ProjectsService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -21,6 +22,8 @@ use Throwable;
 #[Description('Remove a project by UUID.')]
 class RemoveProjectTool extends Tool
 {
+    use RegistersWhenWritable;
+
     /**
      * Handle the tool request.
      */

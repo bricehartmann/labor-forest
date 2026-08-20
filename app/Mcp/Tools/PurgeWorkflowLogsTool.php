@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Concerns\Mcp\RegistersWhenWritable;
 use App\Concerns\Mcp\ResolvesWorkspace;
 use App\Events\GlobalRefresh;
 use App\Services\WorkflowService;
@@ -23,6 +24,7 @@ use Throwable;
 #[Description('Delete the run log records of a single workflow within a workspace by path. Runs that are still pending or running are left alone.')]
 class PurgeWorkflowLogsTool extends Tool
 {
+    use RegistersWhenWritable;
     use ResolvesWorkspace;
 
     /**
