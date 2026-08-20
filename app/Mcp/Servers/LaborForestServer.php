@@ -2,10 +2,14 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Prompts\AuthorWorkflowPrompt;
+use App\Mcp\Prompts\ConvertSetupToWorkflowPrompt;
+use App\Mcp\Prompts\DiagnoseWorkflowRunPrompt;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use App\Mcp\Resources\TemplateVariablesResource;
+use App\Mcp\Resources\WorkflowSchemaResource;
 use App\Mcp\Resources\WorkspacesResource;
 use App\Mcp\Tools\AddProjectTool;
 use App\Mcp\Tools\AddWorkspaceExampleWorkflowsTool;
@@ -40,9 +44,10 @@ copies. It is not CI, and it is not a way to manage agents.
   directory other than the `$HOME` directory that contains a `.laborforest` directory is a Workspace,
   including the Project's own primary directory.
 - **Workflow** — a YAML file the user writes, stored at `.laborforest/workflows/<name>.yaml` inside the
-  Workspace it runs against. Always addressed by name with no extension, so `up` means `up.yaml`. Its
-  steps run sequentially in the Workspace directory and are of three types: `shell`, `update_env`
-  (rewrites keys in the Workspace's `.env`) and `workflow` (runs another workflow inline).
+  Workspace it runs against. Always addressed by name with no extension, so `up` means `up.yaml`, and
+  a `.yml` file is read just the same. Its steps run sequentially in the Workspace directory and are
+  of three types: `shell`, `update_env` (rewrites keys in the Workspace's `.env`) and `workflow`
+  (runs another workflow inline).
 
 ## Orienting yourself
 
@@ -55,6 +60,8 @@ copies. It is not CI, and it is not a way to manage agents.
   before writing any `{{ }}` tag into a launch command. Tags also accept an `ENV_` prefix —
   `{{ ENV_APP_URL }}` reads `APP_URL` from the Workspace's own `.env` — which works everywhere the
   listed variables do but is deliberately absent from that list.
+- Read `laborforest://workflow-schema` before writing or editing any workflow file. No tool here
+  writes one, and several of the grammar's rules are not guessable from an example.
 - Order matters. A Project must be registered before `add-workspace` will accept it, and a Workspace must
   exist before workflows can be seeded into it or run in it.
 
@@ -77,6 +84,18 @@ copies. It is not CI, and it is not a way to manage agents.
 - Steps run with LaborForest's own environment stripped out, under the workflow step timeout from the
   settings, which applies to each spawned process rather than to the run as a whole.
 
+## Authoring workflows
+
+Workflow files are written by hand, by the user or by you. There is no tool that creates or edits
+one, so the file itself is written with whatever file tools the client has, against the grammar in
+`laborforest://workflow-schema`, and then checked with `validate-workflow`.
+
+Three prompts cover the jobs that take more than a tool call: `author-workflow` writes one workflow
+from a description of what it should do, `convert-setup-to-workflow` turns a project's existing setup
+instructions into the workflows that reproduce them, and `diagnose-workflow-run` works out why a run
+failed by reading the run logs the Workspace keeps at `.laborforest/ignored/logs/`. Those logs are
+files on disk; nothing here serves them, and nothing here reports on a run in flight.
+
 ## Constraints
 
 - Every tool acts on this machine as the logged-in user, with that user's shell and git credentials.
@@ -93,7 +112,8 @@ copies. It is not CI, and it is not a way to manage agents.
   A command naming a variable LaborForest does not recognize is rejected.
 - A tool that fails answers with the underlying message as an MCP error rather than raising. The message
   is usually actionable without asking the user.
-- This server exposes tools and resources only. There are no prompts and no interactive MCP apps.
+- This server exposes tools, resources and prompts. There are no interactive MCP apps. A prompt only
+  hands back instructions for you to carry out; invoking one changes nothing on the machine.
 INSTRUCTIONS)]
 class LaborForestServer extends Server
 {
@@ -119,10 +139,13 @@ class LaborForestServer extends Server
         ProjectResource::class,
         WorkspacesResource::class,
         TemplateVariablesResource::class,
+        WorkflowSchemaResource::class,
     ];
 
     protected array $prompts = [
-        //
+        AuthorWorkflowPrompt::class,
+        ConvertSetupToWorkflowPrompt::class,
+        DiagnoseWorkflowRunPrompt::class,
     ];
 
     /**

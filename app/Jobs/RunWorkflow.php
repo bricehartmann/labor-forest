@@ -8,7 +8,6 @@ use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
-use App\Enums\Directory;
 use App\Enums\File as FileName;
 use App\Enums\FileExtension;
 use App\Enums\WorkflowStatus;
@@ -85,14 +84,10 @@ class RunWorkflow implements ShouldQueue
         // the status on disk is already `pending` by the time this job runs, so the status the run was
         // dispatched from is the only sound answer for a workflow that declares no `ending_status`
         $currentStatus = $this->statusBeforeRun ?? $projectService->loadProjectWorkspaceStatus($workspaceData->path);
-        $workflowPath = implode(DIRECTORY_SEPARATOR, [
-            $workspaceData->path,
-            Directory::BASE->value,
-            Directory::WORKFLOWS->value,
-            $this->workflowName.'.'.FileExtension::YAML->value,
-        ]);
+        $workflowService = app(WorkflowService::class);
+        $workflowPath = $workflowService->workflowPath($workspaceData->path, $this->workflowName);
 
-        $workflowData = app(WorkflowService::class)->loadWorkflow($workflowPath);
+        $workflowData = $workflowService->loadWorkflow($workflowPath);
 
         Log::info('workflow: workflow loaded', $this->logContext([
             'workflow_path' => $workflowPath,
@@ -104,8 +99,6 @@ class RunWorkflow implements ShouldQueue
         broadcast(new ProjectDataUpdated($projectData->uuid));
 
         Log::info('workflow: workspace status set to working', $this->logContext());
-
-        $workflowService = app(WorkflowService::class);
 
         $this->workflowRunLogData = $workflowService->workflowRunLogData(
             timestamp: $this->timestamp,

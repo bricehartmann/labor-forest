@@ -32,6 +32,8 @@ The app window is served by its own process, which does refuse requests that do 
 
 **Change configuration without leaving the conversation.** `update-settings` writes the global launch commands and the workflow step timeout, and `update-project-launch-commands` writes the overrides that one Project uses in place of them. The `template-variables` resource lists the mustache tags those commands accept.
 
+**Write a workflow it has no tool for.** No tool creates or edits a workflow file. The agent reads the `workflow-schema` resource, writes the YAML with its own file tools, and calls `validate-workflow` to check it. The `author-workflow` and `convert-setup-to-workflow` prompts carry that procedure.
+
 **Reclaim what a busy Workspace has accumulated.** Every run of a workflow, and every child workflow it starts, leaves a log file behind. `purge-workflow-logs` deletes the logs of one workflow in one Workspace, leaving the runs that are still going.
 
 ## Resources
@@ -45,6 +47,7 @@ Every resource answers with `application/json`.
 | `project`            | `laborforest://projects/{uuid}`            | One Project by UUID                                                     |
 | `workspaces`         | `laborforest://projects/{uuid}/workspaces` | Every Workspace belonging to one Project                                |
 | `template-variables` | `laborforest://template-variables`         | Each variable a command or workflow step accepts, with an example value |
+| `workflow-schema`    | `laborforest://workflow-schema`            | The grammar of a workflow file: its keys, the three step types, how a step runs |
 
 A Project carries its `uuid`, `path`, `last_opened` timestamp and any launch command overrides, plus the derived names the variables are built from: `dir_name`, `parent_dir`, `slug_kebab` and `slug_snake`.
 
@@ -53,6 +56,8 @@ A Workspace carries `is_primary`, `path`, `branch`, `status` and `git_status`, p
 The `projects` list is ordered by when each Project was last opened. It answers with an empty list rather than an error when no Projects are configured.
 
 `template-variables` lists only the enumerated variables. The `ENV_` prefix, which reads a key out of the Workspace's own `.env` file, is not in that list but works everywhere the enumerated variables do. It is described in [Settings](settings.md).
+
+`workflow-schema` exists because no tool writes a workflow file. An agent asked to write one has to write the YAML itself, and several of the grammar's rules are not guessable from an example: `require_status` and `ending_status` accept only `ready` or `suspended`, a `shell` step's `run` is wrapped in `set -eu; set -o pipefail` while an `if` or `unless` gate is not, and a step's `name` and the keys of its `map` are the fields that do *not* expand `{{ }}` variables. The resource is assembled from the same enums the app validates against, so it cannot describe a grammar the app has stopped accepting. The full reference for humans is [Workflows](workflows.md).
 
 ## Tools
 
@@ -132,6 +137,34 @@ The three values behave as they do for `update-settings`: omitted or `null` keep
 
 Which command actually runs is described in [Projects and Workspaces](projects-and-workspaces.md): the Project's override when it has one, the global command otherwise.
 
+## Prompts
+
+A prompt is a template your MCP client offers you by name — usually as a slash command — that expands into instructions for the agent. Invoking one runs nothing and changes nothing on your machine; it only tells the agent what to do next, so every effect still arrives through a tool call or through the agent's own file tools.
+
+The three prompts cover the jobs that take more than a tool call, all of them to do with the workflow files no tool writes.
+
+| Prompt                      | Arguments                        | What it does                                                                   |
+|-----------------------------|----------------------------------|--------------------------------------------------------------------------------|
+| `author-workflow`           | `path`, `goal`, optional `name`  | Writes one new workflow for a Workspace from a description of what it should do |
+| `convert-setup-to-workflow` | `path`, optional `source`        | Turns a project's existing setup instructions into the workflows that reproduce them |
+| `diagnose-workflow-run`     | `path`, optional `workflow`      | Works out why a run failed, by reading the run logs on disk                      |
+
+### Authoring a workflow
+
+`author-workflow` takes the Workspace path and a description of what the workflow should do, and optionally the name to give it. It points the agent at the `workflow-schema` and `template-variables` resources, has it read the Workspace's existing workflows and the repository itself before choosing any commands, writes the file, and then checks it with `validate-workflow` until it passes.
+
+The instructions it carries are as much about restraint as about grammar. Every step should be safe to run twice, so a step that creates something is gated with `unless` and one that removes something with `if`. Anything specific to a single Workspace — a database name, a URL, a bucket — belongs in an `update_env` step built from mustache tags rather than hard-coded into a command. And the agent is told not to run the workflow to test it: `validate-workflow` is the check, and starting a run is your decision, not the agent's.
+
+`convert-setup-to-workflow` is the same job starting from what a project already documents — a README section, a Makefile, the scripts of a package manifest, a compose file — and it additionally has to split those steps into an `up`, a `down` and whatever operational workflows the project needs, by what each step does to the Workspace rather than by which file it came from. It reports what it could not convert, which is usually an interactive step that has no non-interactive equivalent.
+
+### Diagnosing a failed run
+
+Nothing on this server reports on a run. `run-workflow` returns a run log ID and returns immediately, and there is no tool that reads a log back. `diagnose-workflow-run` closes that gap by sending the agent to the files themselves, in `.laborforest/ignored/logs/` inside the Workspace.
+
+It explains what to read: the log file names sort by time, so the newest run is the last one; the failing step is the one with a non-zero `exitCode`, while the steps after it carry `skip_reason: aborted` and never ran at all; the `output` is raw stdout and stderr with ANSI escapes still in it; and a failing `workflow` step's `log_id` names the child run's own log, which is where the real failure is.
+
+It ends by handing back to you. A failed run leaves the Workspace in `error`, and nothing over MCP can clear that status — only you can, from the app.
+
 ## Errors
 
 A tool that fails returns the underlying message as an MCP error rather than raising anything, so the failure arrives as readable text in the agent's transcript: `Workspace at path '/tmp/nope' not found.`, `Project with UUID '…' not found.`, `The projects file [.laborforest/projects.yaml] is invalid: …`. An agent can usually act on these without your help.
@@ -148,7 +181,7 @@ The server runs only while the app does. Disabling MCP stops the process outrigh
 
 The port has to be between `1024` and `49151`, and it cannot be the port the app window is served on.
 
-The server exposes no prompts and no interactive MCP apps, only the tools and resources above. It reports the app's own version to clients, and is not versioned separately.
+The server exposes no interactive MCP apps, only the tools, resources and prompts above. It reports the app's own version to clients, and is not versioned separately.
 
 Everything a tool does runs as the logged-in user, on the same machine, with that user's git credentials and shell.
 

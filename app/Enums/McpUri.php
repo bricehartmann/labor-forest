@@ -18,6 +18,7 @@ enum McpUri: string
     case SETTINGS = 'laborforest://settings';
     case PROJECTS = 'laborforest://projects';
     case TEMPLATE_VARIABLES = 'laborforest://template-variables';
+    case WORKFLOW_SCHEMA = 'laborforest://workflow-schema';
     case PROJECT = 'laborforest://projects/{uuid}';
     case WORKSPACES = 'laborforest://projects/{uuid}/workspaces';
 

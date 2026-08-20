@@ -951,9 +951,15 @@ describe('doesAnyProjectWorkspaceWorkflowExist', function () {
     });
 
     it('ignores files that are not named with a yaml extension', function () {
-        $this->workflowFiles = [workflowFileInfo('notes.yml')];
+        $this->workflowFiles = [workflowFileInfo('notes.txt')];
 
         expect($this->projects->doesAnyProjectWorkspaceWorkflowExist($this->worktree))->toBeFalse();
+    });
+
+    it('is true when the only workflow is written with the yml extension', function () {
+        $this->workflowFiles = [workflowFileInfo('up.yml')];
+
+        expect($this->projects->doesAnyProjectWorkspaceWorkflowExist($this->worktree))->toBeTrue();
     });
 
     it('swallows the parse error of an unreadable workflow file', function () {

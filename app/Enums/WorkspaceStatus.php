@@ -30,6 +30,22 @@ enum WorkspaceStatus: string implements HasColor, HasLabel
         };
     }
 
+    /**
+     * The statuses a workflow file may name in `require_status` or `ending_status`.
+     *
+     * The rest are held by the app rather than declared by the user: `pending` and `working` belong
+     * to a run in flight, and `error` and `unknown` are cleared from the app.
+     *
+     * @return array<int, string>
+     */
+    public static function declarableInWorkflowValues(): array
+    {
+        return [
+            self::READY->value,
+            self::SUSPENDED->value,
+        ];
+    }
+
     public function ableToRunWorkflow(): bool
     {
         return match ($this) {

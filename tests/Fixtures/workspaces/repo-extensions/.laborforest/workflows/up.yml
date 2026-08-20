@@ -1,0 +1,8 @@
+resource_type: workflow
+require_status: suspended
+ending_status: ready
+sort_order: 50
+steps:
+    - name: 'Shadowed by the yaml spelling'
+      type: shell
+      run: 'false'

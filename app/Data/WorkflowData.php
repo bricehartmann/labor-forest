@@ -38,18 +38,12 @@ class WorkflowData extends Data
             'require_status' => [
                 'nullable',
                 'string',
-                Rule::in([
-                    WorkspaceStatus::READY->value,
-                    WorkspaceStatus::SUSPENDED->value,
-                ]),
+                Rule::in(WorkspaceStatus::declarableInWorkflowValues()),
             ],
             'ending_status' => [
                 'nullable',
                 'string',
-                Rule::in([
-                    WorkspaceStatus::READY->value,
-                    WorkspaceStatus::SUSPENDED->value,
-                ]),
+                Rule::in(WorkspaceStatus::declarableInWorkflowValues()),
             ],
         ];
     }

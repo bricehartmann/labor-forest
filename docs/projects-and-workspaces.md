@@ -71,6 +71,8 @@ If no Workflows exist yet, the menu offers `Create example workflows`, which let
 
 **Important**: Workflows are copied from the base branch at the time of Workspace creation. It is recommended to establish your Workflows in your `main` branch before continuing with additional Workspaces.
 
+**Important**: If you do not commit your `.laborforest` directory, a Workflow you create in a linked Workspace exists only in that worktree's directory. Removing the Workspace deletes the directory and the Workflow with it, and it is not recoverable from git. Git also refuses to remove a worktree that holds untracked files, so such a removal requires the `Force worktree removal` option, which discards them without a further warning. To keep a Workflow you wrote in a linked Workspace, copy the file into the primary Workspace's `.laborforest/workflows` directory before removing the Workspace, so that later Workspaces are seeded from it.
+
 The copy reads the `.laborforest/workflows` directory of the Workspace the base branch is checked out in, which is how Workflows kept out of git reach a new Workspace at all. A Workspace created from an existing branch names no base branch, so the branch checked out in the primary Workspace stands in for one. If the base branch has no Workspace, the primary Workspace is used. If you commit your Workflows, they arrive with the checkout and no copy is made. Nothing is copied after creation, so a Workspace that starts with no Workflows keeps none until you add them.
 
 ## Logs menu button

@@ -229,7 +229,10 @@ describe('run-workflow', function () {
         cliToolsExpectNoDispatch();
 
         expect(cliToolsRun())->toBe(cliToolsDashboardUrl('Workflow does not exist.'))
-            ->and($this->checkedFilePaths)->toBe(['/tmp/repo-feature/.laborforest/workflows/down.yaml']);
+            ->and($this->checkedFilePaths)->toBe([
+                '/tmp/repo-feature/.laborforest/workflows/down.yaml',
+                '/tmp/repo-feature/.laborforest/workflows/down.yml',
+            ]);
     });
 
     it('reports the failure when the workspace is not found', function () {
@@ -362,6 +365,26 @@ describe('validate-workflow', function () {
         expect($this->checkedFilePaths)->toBe([$this->workflowPath]);
     });
 
+    it('resolves a workflow file written with the yml extension', function () {
+        $this->existingPaths = [$this->workspacePath, '/tmp/repo-feature/.laborforest/workflows/up.yml'];
+
+        cliToolsWritePendingValidate($this->workspacePath, 'up');
+        cliToolsMockProjectsService($this->workspacePath, componentProjectData($this->uuid, '/tmp/repo'));
+        cliToolsExpectNothingRun();
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadWorkflow')
+                ->once()
+                ->with('/tmp/repo-feature/.laborforest/workflows/up.yml')
+                ->andReturn(componentWorkflowData([componentStepData()]));
+        });
+
+        expect(cliToolsRun())->toBe(Project::getUrl([
+            'uuid' => $this->uuid,
+            'success' => 'Workflow [up] is valid.',
+        ]));
+    });
+
     it('reports every problem of an invalid workflow on the project page', function () {
         cliToolsWritePendingValidate($this->workspacePath, 'up');
         cliToolsMockProjectsService($this->workspacePath, componentProjectData($this->uuid, '/tmp/repo'));
@@ -408,7 +431,10 @@ describe('validate-workflow', function () {
         cliToolsExpectNoValidation();
 
         expect(cliToolsRun())->toBe(cliToolsDashboardUrl('Workflow does not exist.'))
-            ->and($this->checkedFilePaths)->toBe(['/tmp/repo-feature/.laborforest/workflows/down.yaml']);
+            ->and($this->checkedFilePaths)->toBe([
+                '/tmp/repo-feature/.laborforest/workflows/down.yaml',
+                '/tmp/repo-feature/.laborforest/workflows/down.yml',
+            ]);
     });
 
     it('reports the failure when the workspace is not found', function () {

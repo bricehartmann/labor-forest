@@ -2,9 +2,11 @@
 
 ## Overview
 
-Workflows are sets of sequential steps defined in `.yaml` files. They run on your local machine, in the directory of the Workspace they were started from. They are very loosely inspired by GitHub Actions.
+Workflows are sets of sequential steps defined in YAML files. They run on your local machine, in the directory of the Workspace they were started from. They are very loosely inspired by GitHub Actions.
 
 Each Workspace has its own workflows, stored in that worktree's `.laborforest/workflows` directory. A new Workspace is seeded from the base branch it was created from, as described in [Projects & Workspaces](projects-and-workspaces.md).
+
+If your `.laborforest` directory is not committed, a Workflow written in a linked Workspace is lost when that Workspace is removed. See [Projects & Workspaces](projects-and-workspaces.md) for how to keep it.
 
 Example Workflows are included and can be added from the `Workflows` row action menu. The sets are `Bare`, `Laravel`, and `JavaScript`.
 
@@ -34,7 +36,7 @@ A step can be skipped for four reasons. It was not selected in the run modal, it
 
 Workflows are managed manually through your YAML editor of choice. A Workflow's name is its file name without the extension, so `up.yaml` is run as `up`. A `name` key inside the file is ignored.
 
-Files must end in `.yaml`. A file ending in `.yml` is ignored entirely.
+Files must end in `.yaml` or `.yml`; both are read the same way. A Workspace holding both spellings of one name — `up.yaml` and `up.yml` — keeps the `.yaml` file and ignores the other, since the two would otherwise be the same workflow. LaborForest writes `.yaml` itself, and the example Workflows ship that way.
 
 File names should be `kebab-case`. This is a convention rather than a rule, but two things depend on it. The label shown in the `Workflows` menu is derived from the file name, so `db-refresh` is displayed as `Db Refresh`. Run log identifiers slugify the name, so `db-refresh.yaml` and `db_refresh.yaml` produce colliding log identifiers.
 

@@ -2,6 +2,7 @@
 
 use App\Data\ProjectData;
 use App\Data\SettingsData;
+use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\McpUri;
 use App\Enums\Variable;
@@ -18,10 +19,14 @@ use App\Exceptions\WorkflowLogsNotDeleted;
 use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceDirectoryExists;
 use App\Exceptions\WorkspaceNotFound;
+use App\Mcp\Prompts\AuthorWorkflowPrompt;
+use App\Mcp\Prompts\ConvertSetupToWorkflowPrompt;
+use App\Mcp\Prompts\DiagnoseWorkflowRunPrompt;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use App\Mcp\Resources\TemplateVariablesResource;
+use App\Mcp\Resources\WorkflowSchemaResource;
 use App\Mcp\Resources\WorkspacesResource;
 use App\Mcp\Servers\LaborForestServer;
 use App\Mcp\Tools\AddProjectTool;
@@ -46,6 +51,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Contracts\Transport;
+use Laravel\Mcp\Server\Prompt;
 use Laravel\Mcp\Server\Resource;
 use Laravel\Mcp\Server\Tool;
 use Mockery\MockInterface;
@@ -82,7 +88,11 @@ it('tells connecting clients what the server is for and what it will not do', fu
         // nothing else warns that a tool call runs the user's shell unprompted
         ->toContain('Nothing on the LaborForest side asks the user to confirm a tool call.')
         // the settings the server refuses to change out from under its own client
-        ->toContain('cannot change `mcp_enabled` or `mcp_port`');
+        ->toContain('cannot change `mcp_enabled` or `mcp_port`')
+        // no tool writes a workflow file, so the grammar has to be fetched before one is written
+        ->toContain('laborforest://workflow-schema')
+        // the run logs are files on disk, because nothing here serves them
+        ->toContain('.laborforest/ignored/logs/');
 });
 
 describe('uris', function () {
@@ -108,12 +118,13 @@ describe('resources', function () {
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
         expect($context->resources()->map(fn (Resource $resource) => $resource->name())->values()->all())
-            ->toBe(['settings', 'projects', 'template-variables'])
+            ->toBe(['settings', 'projects', 'template-variables', 'workflow-schema'])
             ->and($context->resources()->map(fn (Resource $resource) => $resource->uri())->values()->all())
             ->toBe([
                 'laborforest://settings',
                 'laborforest://projects',
                 'laborforest://template-variables',
+                'laborforest://workflow-schema',
             ])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => $resource->name())->values()->all())
             ->toBe(['project', 'workspaces'])
@@ -333,6 +344,140 @@ describe('resources', function () {
             // the enumerated variables alone: the dynamic ENV_ prefix is deliberately not listed
             ->assertSee('"variable":"WORKSPACE_DIR"')
             ->assertDontSee('ENV_');
+    });
+
+    it('reads the workflow schema as json', function () {
+        LaborForestServer::resource(WorkflowSchemaResource::class)
+            ->assertOk()
+            ->assertName('workflow-schema')
+            // the file is only read as a workflow when it declares this, and only from this directory
+            ->assertSee('"directory":".laborforest/workflows"')
+            ->assertSee('"resource_type":{"required":true,"value":"workflow"}')
+            // the ENV_ passthrough the template-variables resource deliberately omits
+            ->assertSee('ENV_APP_URL');
+    });
+
+    it('builds the workflow schema from the enums the app validates against', function () {
+        $response = LaborForestServer::resource(WorkflowSchemaResource::class);
+
+        // every step type, each with the key it cannot be written without
+        foreach (WorkflowStepType::cases() as $type) {
+            $response->assertSee('"type":"'.$type->value.'","requires":"'.$type->requiredKey().'"');
+        }
+
+        // every variable, and only the statuses a workflow file is allowed to declare
+        foreach (Variable::cases() as $variable) {
+            $response->assertSee('"variable":"'.$variable->value.'"');
+        }
+
+        $response->assertSee(mcpJson(WorkspaceStatus::declarableInWorkflowValues()));
+    });
+
+    /**
+     * The schema names the key each step type requires, while the rules that actually reject a step
+     * missing it live on WorkflowStepData. Nothing but this holds the two together.
+     */
+    it('names a required step key the step rules agree is required', function (WorkflowStepType $type) {
+        expect(WorkflowStepData::rules()[$type->requiredKey()])
+            ->toContain('required_if:type,'.$type->value);
+    })->with(WorkflowStepType::cases());
+});
+
+describe('prompts', function () {
+    it('lists the registered prompts', function () {
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
+
+        expect($context->prompts()->map(fn (Prompt $prompt) => $prompt->name())->values()->all())
+            ->toBe(['author-workflow', 'convert-setup-to-workflow', 'diagnose-workflow-run']);
+    });
+
+    it('hands back instructions for writing one workflow', function () {
+        LaborForestServer::prompt(AuthorWorkflowPrompt::class, [
+            'path' => '/tmp/repo-feature/',
+            'goal' => 'bring the workspace up',
+            'name' => 'up',
+        ])
+            ->assertOk()
+            ->assertName('author-workflow')
+            // the grammar is fetched rather than recalled, because no tool writes a workflow file
+            ->assertSee('laborforest://workflow-schema')
+            ->assertSee('no tool on this server writes workflow files')
+            // the check that has no consequences, as against starting a run
+            ->assertSee('validate-workflow')
+            ->assertSee('Do not run the workflow to test it.')
+            // the trailing slash is trimmed, as everywhere else a path is taken
+            ->assertSee('/tmp/repo-feature/.laborforest/workflows')
+            ->assertDontSee('/tmp/repo-feature//.laborforest');
+    });
+
+    it('names the workflow to write when one was given', function () {
+        LaborForestServer::prompt(AuthorWorkflowPrompt::class, [
+            'path' => '/tmp/repo-feature',
+            'goal' => 'bring the workspace up',
+            'name' => 'up',
+        ])->assertSee('Write the workflow `up`');
+    });
+
+    it('leaves the workflow name to be chosen when none was given', function () {
+        LaborForestServer::prompt(AuthorWorkflowPrompt::class, [
+            'path' => '/tmp/repo-feature',
+            'goal' => 'bring the workspace up',
+        ])->assertOk()->assertSee('choose a file name for it');
+    });
+
+    it('hands back instructions for reading the run logs off disk', function () {
+        LaborForestServer::prompt(DiagnoseWorkflowRunPrompt::class, ['path' => '/tmp/repo-feature'])
+            ->assertOk()
+            ->assertName('diagnose-workflow-run')
+            // no tool serves the logs, so the directory itself is the answer
+            ->assertSee('/tmp/repo-feature/.laborforest/ignored/logs')
+            // the fields that separate the step that failed from the ones that never ran
+            ->assertSee('exitCode')
+            ->assertSee('skip_reason: aborted')
+            // a nested workflow's failure is in the child's own log
+            ->assertSee('log_id')
+            // the one thing the client cannot do for the user
+            ->assertSee('only the user can, from the app');
+    });
+
+    it('scopes the diagnosis to one workflow when it was named', function () {
+        LaborForestServer::prompt(DiagnoseWorkflowRunPrompt::class, [
+            'path' => '/tmp/repo-feature',
+            'workflow' => 'up',
+        ])->assertSee('the `up` workflow');
+    });
+
+    it('hands back instructions for converting existing setup steps', function () {
+        LaborForestServer::prompt(ConvertSetupToWorkflowPrompt::class, ['path' => '/tmp/repo-feature'])
+            ->assertOk()
+            ->assertName('convert-setup-to-workflow')
+            ->assertSee('laborforest://workflow-schema')
+            // the status pairing that makes a workspace lifecycle reversible
+            ->assertSee('requires `suspended`, ends `ready`')
+            ->assertSee('requires `ready`, ends `suspended`')
+            // what keeps two workspaces of one project from sharing a database
+            ->assertSee('update_env')
+            ->assertSee('validate-workflow');
+    });
+
+    it('starts the conversion from the source it was given', function () {
+        LaborForestServer::prompt(ConvertSetupToWorkflowPrompt::class, [
+            'path' => '/tmp/repo-feature',
+            'source' => 'the Makefile',
+        ])->assertSee('starting from the Makefile');
+    });
+
+    it('refuses a prompt invoked without the workspace it acts on', function (string $prompt) {
+        LaborForestServer::prompt($prompt, [])->assertHasErrors();
+    })->with([
+        AuthorWorkflowPrompt::class,
+        ConvertSetupToWorkflowPrompt::class,
+        DiagnoseWorkflowRunPrompt::class,
+    ]);
+
+    it('refuses to author a workflow without knowing what it should do', function () {
+        LaborForestServer::prompt(AuthorWorkflowPrompt::class, ['path' => '/tmp/repo-feature'])
+            ->assertHasErrors();
     });
 });
 
@@ -763,6 +908,22 @@ describe('tools', function () {
                     ['name' => 'Run down', 'type' => 'workflow'],
                 ],
             ]));
+    });
+
+    it('reads back a workflow written with the yml extension', function () {
+        $workflowPath = '/tmp/repo-feature/.laborforest/workflows/up.yml';
+
+        mcpWorkspaceIsResolved();
+        mcpWorkflowFileExists($workflowPath);
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) use ($workflowPath) {
+            $mock->shouldReceive('workflowPath')->once()->with('/tmp/repo-feature', 'up')->andReturn($workflowPath);
+            $mock->shouldReceive('loadWorkflow')->once()->with($workflowPath)->andReturn(componentWorkflowData([componentStepData()]));
+        });
+
+        LaborForestServer::tool(ValidateWorkflowTool::class, ['path' => '/tmp/repo-feature', 'workflow' => 'up'])
+            ->assertOk()
+            ->assertSee($workflowPath);
     });
 
     it('reports a workflow name matching no file before validating it', function () {

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Concerns\Services\ResolvesWorkflowFiles;
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
@@ -29,6 +30,8 @@ use Symfony\Component\Yaml\Yaml;
 
 class WorkflowService
 {
+    use ResolvesWorkflowFiles;
+
     public function ensureLogFilePathDirectoryExists(string $workspacePath): string
     {
         $path = $this->logsPath($workspacePath);
@@ -175,35 +178,25 @@ class WorkflowService
     }
 
     /**
-     * The path of the file defining the named workflow of a workspace.
-     */
-    public function workflowPath(string $workspacePath, string $workflowName): string
-    {
-        return implode(DIRECTORY_SEPARATOR, [
-            $workspacePath,
-            Directory::BASE->value,
-            Directory::WORKFLOWS->value,
-            $workflowName.'.'.FileExtension::YAML->value,
-        ]);
-    }
-
-    /**
      * @return Collection<string, WorkflowData> keyed by the workflow file name without its extension
      */
     public function loadWorkflows(string $workspacePath): Collection
     {
-        $workflowsPath = implode(DIRECTORY_SEPARATOR, [
-            $workspacePath,
-            Directory::BASE->value,
-            Directory::WORKFLOWS->value,
-        ]);
+        $workflowsPath = $this->workflowsPath($workspacePath);
 
         if (! File::isDirectory($workflowsPath)) {
             return collect();
         }
 
         return collect(File::files($workflowsPath))
-            ->reject(fn (SplFileInfo $file) => $file->getExtension() !== FileExtension::YAML->value)
+            ->reject(fn (SplFileInfo $file) => ! FileExtension::isYaml($file->getExtension()))
+            /**
+             * A workflow is keyed by its file name without the extension, so `up.yaml` and `up.yml`
+             * would collide on one key in whatever order the directory happens to be read. Dropping
+             * the `.yml` here settles it before that can happen rather than relying on that order.
+             */
+            ->reject(fn (SplFileInfo $file) => $file->getExtension() === FileExtension::YML->value
+                && File::isFile($workflowsPath.DIRECTORY_SEPARATOR.$file->getFilenameWithoutExtension().'.'.FileExtension::YAML->value))
             ->filter(function (SplFileInfo $file) {
                 $yaml = rescue(fn () => Yaml::parseFile($file->getPathname()));
 

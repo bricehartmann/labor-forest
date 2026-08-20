@@ -497,9 +497,47 @@ describe('ensureWorkspaceCanRunWorkflow', function () {
     ]);
 });
 
+describe('workflowPath', function () {
+    beforeEach(function () {
+        $this->fixturePath = fixtureWorkspacePath('repo-extensions');
+    });
+
+    it('resolves a workflow written with the yaml extension', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'down'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/down.yaml');
+    });
+
+    it('resolves a workflow written with the yml extension', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'refresh'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/refresh.yml');
+    });
+
+    it('prefers the yaml spelling when a workspace holds both', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'up'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/up.yaml');
+    });
+
+    it('falls back to the yaml spelling when the workflow does not exist', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'nope'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/nope.yaml');
+    });
+});
+
 describe('loadSteps', function () {
     beforeEach(function () {
         $this->fixturePath = fixtureWorkspacePath('repo-feature');
+    });
+
+    it('returns the steps of a workflow written with the yml extension', function () {
+        $steps = $this->workflows->loadSteps(fixtureWorkspacePath('repo-extensions'), 'refresh');
+
+        expect($steps->pluck('name')->all())->toBe(['Loaded from the yml spelling']);
+    });
+
+    it('returns the steps of the yaml spelling when a workspace holds both', function () {
+        $steps = $this->workflows->loadSteps(fixtureWorkspacePath('repo-extensions'), 'up');
+
+        expect($steps->pluck('name')->all())->toBe(['Loaded from the yaml spelling']);
     });
 
     it('returns the steps of the named workflow file', function () {
@@ -558,6 +596,25 @@ describe('loadWorkflows', function () {
         'not parseable yaml' => ['broken'],
         'no steps' => ['empty-steps'],
     ]);
+
+    it('loads a workflow written with the yml extension', function () {
+        $workflows = $this->workflows->loadWorkflows(fixtureWorkspacePath('repo-extensions'));
+
+        expect($workflows->keys()->all())->toContain('refresh')
+            ->and($workflows->get('refresh')->steps->pluck('name')->all())->toBe(['Loaded from the yml spelling']);
+    });
+
+    /**
+     * Both spellings key on the same name, so the loser has to be dropped before the collection is
+     * built rather than left to whichever order the directory happens to be read in.
+     */
+    it('ignores a yml file whose yaml sibling exists', function () {
+        $workflows = $this->workflows->loadWorkflows(fixtureWorkspacePath('repo-extensions'));
+
+        expect($workflows->keys()->all())->toBe(['up', 'refresh', 'down'])
+            ->and($workflows->get('up')->sort_order)->toBe(0)
+            ->and($workflows->get('up')->steps->pluck('name')->all())->toBe(['Loaded from the yaml spelling']);
+    });
 
     it('returns an empty collection when the workflows directory does not exist', function () {
         File::partialMock()->shouldReceive('isDirectory')->andReturnFalse();

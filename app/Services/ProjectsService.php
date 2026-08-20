@@ -368,7 +368,7 @@ class ProjectsService
         $disk = Storage::disk(Disk::EXTRAS->value);
 
         collect($disk->files($examplePath))
-            ->filter(fn (string $file) => Str::afterLast($file, '.') === FileExtension::YAML->value)
+            ->filter(fn (string $file) => FileExtension::isYaml(Str::afterLast($file, '.')))
             ->filter(function (string $file) use ($disk) {
                 $yaml = rescue(fn () => Yaml::parse($disk->get($file) ?? ''));
 
@@ -456,7 +456,7 @@ class ProjectsService
         }
 
         return collect(\Illuminate\Support\Facades\File::files($pathWorkflowsDir))
-            ->reject(fn (SplFileInfo $file) => $file->getExtension() !== FileExtension::YAML->value)
+            ->reject(fn (SplFileInfo $file) => ! FileExtension::isYaml($file->getExtension()))
             ->map(fn (SplFileInfo $file) => rescue(fn () => Yaml::parseFile($file->getPathname())))
             ->filter()
             ->contains('resource_type', YamlResourceType::WORKFLOW->value);
