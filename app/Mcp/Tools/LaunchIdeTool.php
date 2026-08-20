@@ -51,7 +51,7 @@ class LaunchIdeTool extends Tool
             return Response::error($th->getMessage());
         }
 
-        return Response::text('success');
+        return Response::text('success')->asAssistant();
     }
 
     /**

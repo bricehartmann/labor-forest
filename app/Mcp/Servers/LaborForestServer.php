@@ -6,10 +6,12 @@ use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use App\Mcp\Resources\WorkspacesResource;
+use App\Mcp\Tools\AddProjectTool;
 use App\Mcp\Tools\FindProjectByPathTool;
 use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
 use App\Mcp\Tools\LaunchTerminalTool;
+use App\Mcp\Tools\RemoveProjectTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -28,6 +30,8 @@ class LaborForestServer extends Server
         LaunchIdeTool::class,
         LaunchTerminalTool::class,
         LaunchBrowserTool::class,
+        AddProjectTool::class,
+        RemoveProjectTool::class,
     ];
 
     protected array $resources = [
