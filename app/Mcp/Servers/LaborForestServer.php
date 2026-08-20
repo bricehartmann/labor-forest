@@ -32,11 +32,6 @@ class LaborForestServer extends Server
         ProjectsResource::class,
         ProjectResource::class,
         WorkspacesResource::class,
-        WorkspaceResource::class,
-        WorkflowsResource::class,
-        WorkflowResource::class,
-        WorkflowLogsResource::class,
-        WorkflowLogResource::class,
     ];
 
     protected array $prompts = [
