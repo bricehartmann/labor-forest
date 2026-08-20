@@ -5,15 +5,20 @@ namespace App\Data;
 use App\Contracts\McpResource;
 use App\Enums\WorkflowStatus;
 use App\Enums\YamlResourceType;
-use Illuminate\Support\Collection;
-use RuntimeException;
 use Spatie\LaravelData\Attributes\WithCast;
 use Spatie\LaravelData\Casts\EnumCast;
 use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Support\Transformation\TransformationContext;
 use Spatie\LaravelData\Support\Transformation\TransformationContextFactory;
 
-class WorkflowRunLogData extends Data implements McpResource
+/**
+ * A run log without its steps, for listing runs.
+ *
+ * Step output is streamed into WorkflowRunLogData::$steps by RunWorkflow and can run to
+ * megabytes per run, so a list of runs is hydrated from this instead. Unknown keys are ignored
+ * by Data::from(), which lets a whole parsed log hydrate this just as well as a stripped header.
+ */
+class WorkflowRunLogSummaryData extends Data implements McpResource
 {
     public function __construct(
         public string $id,
@@ -24,8 +29,6 @@ class WorkflowRunLogData extends Data implements McpResource
         #[WithCast(EnumCast::class)]
         public WorkflowStatus $status,
         public ?string $exception,
-        /** @var Collection<int, WorkflowRunLogStepData> */
-        public Collection $steps,
     ) {}
 
     public function transform(null|TransformationContextFactory|TransformationContext $transformationContext = null): array
@@ -36,27 +39,8 @@ class WorkflowRunLogData extends Data implements McpResource
         ];
     }
 
-    /**
-     * Fetch the log entry seeded for a step so a run can fill it in as the step progresses.
-     *
-     * @throws RuntimeException when the run log was not seeded with a step at this index
-     */
-    public function step(int|string $index): WorkflowRunLogStepData
-    {
-        $step = $this->steps->get($index);
-
-        if (! $step instanceof WorkflowRunLogStepData) {
-            throw new RuntimeException("Run log has no step at index [{$index}].");
-        }
-
-        return $step;
-    }
-
     public function toMcpResource(): array
     {
-        return [
-            ...$this->toArray(),
-            'steps' => $this->steps->map(fn (WorkflowRunLogStepData $step) => $step->toMcpResource())->values()->all(),
-        ];
+        return $this->toArray();
     }
 }

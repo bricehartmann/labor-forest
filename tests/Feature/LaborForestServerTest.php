@@ -1,16 +1,20 @@
 <?php
 
 use App\Data\SettingsData;
+use App\Enums\WorkflowStatus;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\InvalidSettingsFile;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
+use App\Mcp\Resources\WorkflowLogResource;
+use App\Mcp\Resources\WorkflowLogsResource;
 use App\Mcp\Servers\LaborForestServer;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
 use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Resource;
+use Mockery\MockInterface;
 
 it('reports the application version to connecting clients', function () {
     config(['nativephp.version' => '1.2.3']);
@@ -29,7 +33,7 @@ it('falls back to the development version when the app version is unset', functi
 });
 
 describe('resources', function () {
-    it('lists the fixed-uri resources separately from the templated one', function () {
+    it('lists the fixed-uri resources separately from the templated ones', function () {
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
         expect($context->resources()->map(fn (Resource $resource) => $resource->name())->values()->all())
@@ -37,9 +41,17 @@ describe('resources', function () {
             ->and($context->resources()->map(fn (Resource $resource) => $resource->uri())->values()->all())
             ->toBe(['laborforest://settings', 'laborforest://projects'])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => $resource->name())->values()->all())
-            ->toBe(['project'])
+            ->toBe(['project', 'workspaces', 'workspace', 'workflows', 'workflow', 'workflow-logs', 'workflow-log'])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => (string) $resource->uriTemplate())->values()->all())
-            ->toBe(['laborforest://projects/{uuid}']);
+            ->toBe([
+                'laborforest://projects/{uuid}',
+                'laborforest://projects/{uuid}/workspaces',
+                'laborforest://projects/{uuid}/workspaces/{slugKebab}',
+                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows',
+                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows/{name}',
+                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows/{name}/logs',
+                'laborforest://projects/{uuid}/workspaces/{slugKebab}/workflows/{name}/logs/{id}',
+            ]);
     });
 
     it('reads the settings as json', function () {
@@ -113,6 +125,84 @@ describe('resources', function () {
 
         LaborForestServer::resource(ProjectResource::class, ['uuid' => '33333333-3333-3333-3333-333333333333'])
             ->assertHasErrors(['Failed to load project.']);
+    });
+});
+
+describe('run log resources', function () {
+    beforeEach(function () {
+        $this->uuid = '44444444-4444-4444-4444-444444444444';
+        $this->workspace = workflowWorkspaceData(fixtureWorkspacePath('repo-logs'));
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjects')
+                ->andReturn(collect([componentProjectData($this->uuid, '/tmp/repo')]));
+
+            $mock->shouldReceive('loadProjectWorkspaces')->andReturn(collect([$this->workspace]));
+        });
+    });
+
+    it('lists only the runs of the named workflow, without their steps', function () {
+        LaborForestServer::resource(WorkflowLogsResource::class, [
+            'uuid' => $this->uuid,
+            'slugKebab' => 'repo-logs',
+            'name' => 'down',
+        ])
+            ->assertOk()
+            ->assertSee(mcpJson([
+                componentRunLogSummaryData(
+                    id: '20240102T000000Z_repo-logs_down',
+                    name: 'down',
+                    parent: '20240101T000000Z_repo-logs_up',
+                    timestamp: 1704153600,
+                    status: WorkflowStatus::FAILED,
+                    exception: 'Step [Stop the containers] failed.',
+                )->toMcpResource(),
+            ]))
+            ->assertDontSee('boom')
+            ->assertDontSee('docker compose down');
+    });
+
+    it('lists no run for a workflow that has never run', function () {
+        LaborForestServer::resource(WorkflowLogsResource::class, [
+            'uuid' => $this->uuid,
+            'slugKebab' => 'repo-logs',
+            'name' => 'nothing-ran',
+        ])
+            ->assertOk()
+            ->assertSee('[]');
+    });
+
+    it('reads a single run with the output of every step', function () {
+        LaborForestServer::resource(WorkflowLogResource::class, [
+            'uuid' => $this->uuid,
+            'slugKebab' => 'repo-logs',
+            'name' => 'down',
+            'id' => '20240102T000000Z_repo-logs_down',
+        ])
+            ->assertOk()
+            ->assertSee('Stop the containers')
+            ->assertSee('docker compose down')
+            ->assertSee('boom');
+    });
+
+    it('reports a run log id that matches no run', function () {
+        LaborForestServer::resource(WorkflowLogResource::class, [
+            'uuid' => $this->uuid,
+            'slugKebab' => 'repo-logs',
+            'name' => 'down',
+            'id' => '20240108T000000Z_repo-logs_down',
+        ])
+            ->assertHasErrors(['Failed to load workflow log.']);
+    });
+
+    it('refuses a run log addressed under another workflow name', function () {
+        LaborForestServer::resource(WorkflowLogResource::class, [
+            'uuid' => $this->uuid,
+            'slugKebab' => 'repo-logs',
+            'name' => 'up',
+            'id' => '20240102T000000Z_repo-logs_down',
+        ])
+            ->assertHasErrors(['Failed to load workflow log.']);
     });
 });
 

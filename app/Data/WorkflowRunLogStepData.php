@@ -2,6 +2,7 @@
 
 namespace App\Data;
 
+use App\Contracts\McpResource;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepStatus;
 use App\Enums\WorkflowStepType;
@@ -16,7 +17,7 @@ use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Support\Transformation\TransformationContext;
 use Spatie\LaravelData\Support\Transformation\TransformationContextFactory;
 
-class WorkflowRunLogStepData extends Data
+class WorkflowRunLogStepData extends Data implements McpResource
 {
     public function __construct(
         public string $name,
@@ -167,5 +168,10 @@ class WorkflowRunLogStepData extends Data
             parent::transform($transformationContext),
             fn ($value) => $value !== null,
         );
+    }
+
+    public function toMcpResource(): array
+    {
+        return $this->toArray();
     }
 }

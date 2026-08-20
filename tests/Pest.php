@@ -4,6 +4,7 @@ use App\Data\ProjectData;
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkflowRunLogSummaryData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\GitStatus;
@@ -199,6 +200,27 @@ function componentRunLogData(
         status: $status,
         exception: $exception,
         steps: collect($steps),
+    );
+}
+
+/**
+ * A run log without its steps, as the run log lists hydrate them.
+ */
+function componentRunLogSummaryData(
+    string $id = '20240101T000000Z_repo-feature_up',
+    string $name = 'up',
+    ?string $parent = null,
+    int $timestamp = 1704067200,
+    WorkflowStatus $status = WorkflowStatus::SUCCESS,
+    ?string $exception = null,
+): WorkflowRunLogSummaryData {
+    return new WorkflowRunLogSummaryData(
+        id: $id,
+        name: $name,
+        parent: $parent,
+        timestamp: $timestamp,
+        status: $status,
+        exception: $exception,
     );
 }
 

@@ -5,7 +5,6 @@ namespace App\Data;
 use App\Contracts\McpResource;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
-use Filament\Schemas\Components\Wizard\Step;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Spatie\LaravelData\Attributes\WithCast;
@@ -60,7 +59,7 @@ class WorkflowData extends Data implements McpResource
     {
         return [
             ...$this->toArray(),
-            'steps' => $this->steps->map(fn (Step $step) => $step->toMcpResource())->values()->all(),
+            'steps' => $this->steps->map(fn (WorkflowStepData $step) => $step->toMcpResource())->values()->all(),
         ];
     }
 }

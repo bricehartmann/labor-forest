@@ -3,12 +3,14 @@
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkflowRunLogSummaryData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\GitStatus;
 use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
+use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
 use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
@@ -559,29 +561,65 @@ describe('loadWorkflows', function () {
     });
 });
 
-describe('loadWorkflowLogData', function () {
+describe('loadWorkflowLogSummaryData', function () {
     beforeEach(function () {
         $this->logsWorkspace = workflowWorkspaceData(fixtureWorkspacePath('repo-logs'));
     });
 
     it('returns the run logs newest first, re-indexed from zero', function () {
-        $logs = $this->workflows->loadWorkflowLogData($this->logsWorkspace);
+        $logs = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace);
 
-        expect($logs)->toHaveCount(2)
-            ->and($logs->keys()->all())->toBe([0, 1])
-            ->and($logs->first())->toBeInstanceOf(WorkflowRunLogData::class)
+        expect($logs)->toHaveCount(5)
+            ->and($logs->keys()->all())->toBe([0, 1, 2, 3, 4])
+            ->and($logs->first())->toBeInstanceOf(WorkflowRunLogSummaryData::class)
             ->and($logs->pluck('id')->all())->toBe([
+                '20240111T000000Z_repo-logs_flow',
+                '20240110T000000Z_repo-logs_reordered',
+                '20240109T000000Z_repo-logs_stream',
                 '20240102T000000Z_repo-logs_down',
                 '20240101T000000Z_repo-logs_up',
             ])
-            ->and($logs->pluck('timestamp')->all())->toBe([1704153600, 1704067200])
-            ->and($logs->first()->status)->toBe(WorkflowStatus::FAILED)
-            ->and($logs->first()->parent)->toBe('20240101T000000Z_repo-logs_up')
-            ->and($logs->first()->steps->first()->exitCode)->toBe(1);
+            ->and($logs->pluck('timestamp')->all())->toBe([1704931200, 1704844800, 1704758400, 1704153600, 1704067200])
+            ->and($logs->firstWhere('id', '20240102T000000Z_repo-logs_down')->status)->toBe(WorkflowStatus::FAILED)
+            ->and($logs->firstWhere('id', '20240102T000000Z_repo-logs_down')->parent)->toBe('20240101T000000Z_repo-logs_up')
+            ->and($logs->firstWhere('id', '20240102T000000Z_repo-logs_down')->exception)->toBe('Step [Stop the containers] failed.');
+    });
+
+    it('names its resource type the way the log files do', function () {
+        $log = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)
+            ->firstWhere('id', '20240101T000000Z_repo-logs_up');
+
+        expect($log->toArray())->toHaveKey('resource_type', YamlResourceType::WORKFLOW_RUN_LOG->value)
+            ->and($log->toArray())->not->toHaveKey('steps');
+    });
+
+    it('never reads the steps of a run, so a run whose steps are unparseable still lists', function () {
+        $id = '20240109T000000Z_repo-logs_stream';
+
+        expect($this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)->pluck('id')->all())->toContain($id)
+            ->and($this->workflows->loadWorkflowLogDatum($this->logsWorkspace, $id))->toBeNull();
+    });
+
+    it('reads a log that puts its steps before the rest of its keys', function () {
+        $log = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)
+            ->firstWhere('id', '20240110T000000Z_repo-logs_reordered');
+
+        expect($log)->toBeInstanceOf(WorkflowRunLogSummaryData::class)
+            ->and($log->name)->toBe('reordered')
+            ->and($log->status)->toBe(WorkflowStatus::SUCCESS);
+    });
+
+    it('falls back to a full parse for a log whose steps the header strip cannot skip', function () {
+        $log = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)
+            ->firstWhere('id', '20240111T000000Z_repo-logs_flow');
+
+        expect($log)->toBeInstanceOf(WorkflowRunLogSummaryData::class)
+            ->and($log->name)->toBe('flow')
+            ->and($log->status)->toBe(WorkflowStatus::SUCCESS);
     });
 
     it('drops a log file it cannot turn into a run log', function (string $id) {
-        expect($this->workflows->loadWorkflowLogData($this->logsWorkspace)->pluck('id')->all())->not->toContain($id);
+        expect($this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)->pluck('id')->all())->not->toContain($id);
     })->with([
         'name outside the id pattern' => ['notalog'],
         'not parseable yaml' => ['20240103T000000Z_repo-logs_broken'],
@@ -594,11 +632,11 @@ describe('loadWorkflowLogData', function () {
     it('returns an empty collection when the logs directory does not exist', function () {
         File::partialMock()->shouldReceive('isDirectory')->andReturnFalse();
 
-        expect($this->workflows->loadWorkflowLogData($this->logsWorkspace))->toBeEmpty();
+        expect($this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace))->toBeEmpty();
     });
 
     it('returns an empty collection when every log file is unusable', function () {
-        expect($this->workflows->loadWorkflowLogData(workflowWorkspaceData(fixtureWorkspacePath('repo-badlogs'))))->toBeEmpty();
+        expect($this->workflows->loadWorkflowLogSummaryData(workflowWorkspaceData(fixtureWorkspacePath('repo-badlogs'))))->toBeEmpty();
     });
 });
 
