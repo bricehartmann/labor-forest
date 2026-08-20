@@ -66,6 +66,25 @@ it('falls back to the development version when the app version is unset', functi
     expect($server->createContext()->implementation->version)->toBe('main');
 });
 
+it('tells connecting clients what the server is for and what it will not do', function () {
+    $instructions = (new LaborForestServer($this->mock(Transport::class)))->createContext()->instructions;
+
+    // the load-bearing claims rather than the prose, so the wording stays editable but a dropped fact fails
+    expect($instructions)
+        // the three nouns every tool argument is phrased in
+        ->toContain('**Project**')
+        ->toContain('**Workspace**')
+        ->toContain('**Workflow**')
+        // a queued run is the fact a client cannot infer from the tool schema
+        ->toContain('queues the run and returns immediately')
+        // the statuses the run gate turns on
+        ->toContain('Only `ready` and `suspended` may run anything at all')
+        // nothing else warns that a tool call runs the user's shell unprompted
+        ->toContain('Nothing on the LaborForest side asks the user to confirm a tool call.')
+        // the settings the server refuses to change out from under its own client
+        ->toContain('cannot change `mcp_enabled` or `mcp_port`');
+});
+
 describe('uris', function () {
     it('fills every placeholder in a templated uri', function () {
         expect(McpUri::PROJECT->build(['uuid' => '22222222-2222-2222-2222-222222222222']))
