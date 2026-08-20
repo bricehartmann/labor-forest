@@ -18,7 +18,7 @@ use Throwable;
 
 #[Name('add-workspace')]
 #[Title('Add Workspace')]
-#[Description('Add a new workspace for an existing project.')]
+#[Description('Add a new workspace for an existing project for either a new or existing git branch.')]
 class AddWorkspaceTool extends Tool
 {
     /**
