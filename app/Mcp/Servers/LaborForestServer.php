@@ -5,6 +5,7 @@ namespace App\Mcp\Servers;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
+use App\Mcp\Resources\TemplateVariablesResource;
 use App\Mcp\Resources\WorkspacesResource;
 use App\Mcp\Tools\AddProjectTool;
 use App\Mcp\Tools\AddWorkspaceExampleWorkflowsTool;
@@ -43,6 +44,7 @@ class LaborForestServer extends Server
         ProjectsResource::class,
         ProjectResource::class,
         WorkspacesResource::class,
+        TemplateVariablesResource::class,
     ];
 
     protected array $prompts = [
