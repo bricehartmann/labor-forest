@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Concerns\Services\ResolvesWorkflowFiles;
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkflowRunLogSummaryData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
@@ -13,6 +15,7 @@ use App\Enums\WorkflowStatus;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Exceptions\WorkflowLogsNotDeleted;
 use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Jobs\RunWorkflow;
@@ -27,6 +30,8 @@ use Symfony\Component\Yaml\Yaml;
 
 class WorkflowService
 {
+    use ResolvesWorkflowFiles;
+
     public function ensureLogFilePathDirectoryExists(string $workspacePath): string
     {
         $path = $this->logsPath($workspacePath);
@@ -102,6 +107,8 @@ class WorkflowService
     }
 
     /**
+     * @param  ?array<int, string>  $stepHashes  the steps to run, or null to run every step of the workflow
+     *
      * @throws InvalidWorkflowFile
      * @throws WorkflowNotRunnable
      * @throws WorkspaceNotFound
@@ -133,7 +140,7 @@ class WorkflowService
             projectUuid: $projectUuid,
             workspacePath: $workspacePath,
             workflowName: $workflowName,
-            stepHashes: $stepHashes,
+            stepHashes: $stepHashes ?? $workflowData->stepHashes(),
             parent: $parentLogId,
             timeoutSeconds: $timeoutSeconds,
             // read before the pending write above, so a workflow with no `ending_status` can put the
@@ -171,35 +178,25 @@ class WorkflowService
     }
 
     /**
-     * The path of the file defining the named workflow of a workspace.
-     */
-    public function workflowPath(string $workspacePath, string $workflowName): string
-    {
-        return implode(DIRECTORY_SEPARATOR, [
-            $workspacePath,
-            Directory::BASE->value,
-            Directory::WORKFLOWS->value,
-            $workflowName.'.'.FileExtension::YAML->value,
-        ]);
-    }
-
-    /**
      * @return Collection<string, WorkflowData> keyed by the workflow file name without its extension
      */
     public function loadWorkflows(string $workspacePath): Collection
     {
-        $workflowsPath = implode(DIRECTORY_SEPARATOR, [
-            $workspacePath,
-            Directory::BASE->value,
-            Directory::WORKFLOWS->value,
-        ]);
+        $workflowsPath = $this->workflowsPath($workspacePath);
 
         if (! File::isDirectory($workflowsPath)) {
             return collect();
         }
 
         return collect(File::files($workflowsPath))
-            ->reject(fn (SplFileInfo $file) => $file->getExtension() !== FileExtension::YAML->value)
+            ->reject(fn (SplFileInfo $file) => ! FileExtension::isYaml($file->getExtension()))
+            /**
+             * A workflow is keyed by its file name without the extension, so `up.yaml` and `up.yml`
+             * would collide on one key in whatever order the directory happens to be read. Dropping
+             * the `.yml` here settles it before that can happen rather than relying on that order.
+             */
+            ->reject(fn (SplFileInfo $file) => $file->getExtension() === FileExtension::YML->value
+                && File::isFile($workflowsPath.DIRECTORY_SEPARATOR.$file->getFilenameWithoutExtension().'.'.FileExtension::YAML->value))
             ->filter(function (SplFileInfo $file) {
                 $yaml = rescue(fn () => Yaml::parseFile($file->getPathname()));
 
@@ -214,14 +211,14 @@ class WorkflowService
     }
 
     /**
-     * Read the run logs written by RunWorkflow for a single workspace.
+     * Read the run logs written by RunWorkflow for a single workspace, without their steps.
      *
      * Unparseable or malformed logs are skipped rather than throwing: logs are machine-written
      * runtime artifacts flushed incrementally while a workflow is still running.
      *
-     * @return Collection<int, WorkflowRunLogData> newest run first
+     * @return Collection<int, WorkflowRunLogSummaryData> newest run first
      */
-    public function loadWorkflowLogData(WorkspaceData $workspaceData): Collection
+    public function loadWorkflowLogSummaryData(WorkspaceData $workspaceData): Collection
     {
         $logsPath = $this->logsPath($workspaceData->path);
 
@@ -234,12 +231,67 @@ class WorkflowService
         return collect(File::files($logsPath))
             ->reject(fn (SplFileInfo $file) => $file->getExtension() !== FileExtension::YAML->value)
             ->filter(fn (SplFileInfo $file) => preg_match($fileNamePattern, $file->getFilenameWithoutExtension()) === 1)
-            ->map(fn (SplFileInfo $file) => rescue(fn () => Yaml::parseFile($file->getPathname())))
-            ->filter(fn ($yaml) => is_array($yaml) && ($yaml['resource_type'] ?? null) === YamlResourceType::WORKFLOW_RUN_LOG->value)
-            ->map(fn (array $yaml) => rescue(fn () => WorkflowRunLogData::from($yaml)))
+            ->map(fn (SplFileInfo $file) => $this->loadWorkflowLogSummaryDatum($file->getPathname()))
             ->filter()
-            ->sortByDesc(fn (WorkflowRunLogData $data) => $data->timestamp)
+            ->sortByDesc(fn (WorkflowRunLogSummaryData $data) => $data->timestamp)
             ->values();
+    }
+
+    /**
+     * Read one run log as a summary, reading past its step output rather than through it.
+     *
+     * A run's streamed output can reach megabytes, so the file is first read as a header with the
+     * steps block dropped. Falling back to a full parse covers a log the header strip cannot make
+     * sense of, which a machine-written one never is.
+     */
+    private function loadWorkflowLogSummaryDatum(string $path): ?WorkflowRunLogSummaryData
+    {
+        $summary = $this->makeLogSummary(rescue(fn () => Yaml::parse($this->logHeaderWithoutSteps($path))));
+
+        return $summary ?? $this->makeLogSummary(rescue(fn () => Yaml::parseFile($path)));
+    }
+
+    /**
+     * Read a log file line by line, keeping everything outside its steps block.
+     *
+     * The block is found wherever it sits rather than assumed to be last, because a log written
+     * by hand is under no obligation to order its keys the way Yaml::dump() does.
+     */
+    private function logHeaderWithoutSteps(string $path): string
+    {
+        $inSteps = false;
+
+        return File::lines($path)
+            ->reject(function (string $line) use (&$inSteps) {
+                if ($inSteps) {
+                    if (trim($line) === '' || in_array($line[0], [' ', "\t", '-'], strict: true)) {
+                        return true;
+                    }
+
+                    $inSteps = false;
+                }
+
+                if (preg_match('/^steps\s*:/', $line) === 1) {
+                    $inSteps = true;
+
+                    return true;
+                }
+
+                return false;
+            })
+            ->implode(PHP_EOL);
+    }
+
+    /**
+     * Hydrate a run log summary from parsed YAML, or null when the YAML is not a run log.
+     */
+    private function makeLogSummary(mixed $yaml): ?WorkflowRunLogSummaryData
+    {
+        if (! is_array($yaml) || ($yaml['resource_type'] ?? null) !== YamlResourceType::WORKFLOW_RUN_LOG->value) {
+            return null;
+        }
+
+        return rescue(fn () => WorkflowRunLogSummaryData::from($yaml));
     }
 
     /**
@@ -267,6 +319,39 @@ class WorkflowService
         }
 
         return rescue(fn () => WorkflowRunLogData::from($yaml));
+    }
+
+    /**
+     * Delete the run logs one workflow has written in one workspace.
+     *
+     * A run still pending or running is counted and left on disk rather than deleted, because the
+     * RunWorkflow job holding it is still flushing step output into that file.
+     *
+     * @return array{purged: int, skipped: int}
+     *
+     * @throws WorkflowLogsNotDeleted
+     */
+    public function purgeWorkflowLogs(WorkspaceData $workspaceData, string $workflowName): array
+    {
+        [$locked, $purgeable] = $this->loadWorkflowLogSummaryData($workspaceData)
+            ->filter(fn (WorkflowRunLogSummaryData $data) => $data->name === $workflowName)
+            ->partition(fn (WorkflowRunLogSummaryData $data) => $data->status->isLocked());
+
+        if ($purgeable->isEmpty()) {
+            return ['purged' => 0, 'skipped' => $locked->count()];
+        }
+
+        $logsPath = $this->logsPath($workspaceData->path);
+        $paths = $purgeable
+            ->map(fn (WorkflowRunLogSummaryData $data) => $logsPath.DIRECTORY_SEPARATOR.$data->id.'.'.FileExtension::YAML->value)
+            ->values()
+            ->all();
+
+        if (! File::delete($paths)) {
+            throw new WorkflowLogsNotDeleted($workflowName);
+        }
+
+        return ['purged' => $purgeable->count(), 'skipped' => $locked->count()];
     }
 
     private function logsPath(string $workspacePath): string

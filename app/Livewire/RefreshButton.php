@@ -2,8 +2,10 @@
 
 namespace App\Livewire;
 
+use App\Events\GlobalRefresh;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -14,9 +16,16 @@ use Livewire\Component;
  */
 class RefreshButton extends Component
 {
+    #[On('native:'.GlobalRefresh::class)]
+    public function globalRefresh(): void
+    {
+        $this->flushCache();
+        $this->js('window.location.reload()');
+    }
+
     /**
      * Empty the cache so the page that follows is not answered from the entry it is refreshing —
-     * AppVersionWidget would otherwise keep reading the release it looked up up to 15 minutes ago.
+     * AppVersionWidget would otherwise keep reading the release it looked up; up to 15 minutes ago.
      */
     public function flushCache(): void
     {

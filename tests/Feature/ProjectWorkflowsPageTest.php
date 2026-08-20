@@ -28,9 +28,9 @@ beforeEach(function () {
     $this->timezone = 'UTC';
     $this->projectLoadException = null;
     $this->loadProjectCalls = 0;
-    $this->loadWorkflowLogDataCalls = 0;
+    $this->loadWorkflowLogSummaryDataCalls = 0;
     $this->workspaces = collect([componentWorkspaceData($this->workspacePath)]);
-    $this->runLogs = collect([componentRunLogData(id: $this->logId)]);
+    $this->runLogs = collect([componentRunLogSummaryData(id: $this->logId)]);
 
     System::shouldReceive('timezone')->andReturnUsing(fn () => $this->timezone);
 
@@ -49,8 +49,8 @@ beforeEach(function () {
     });
 
     $this->mock(WorkflowService::class, function (MockInterface $mock) {
-        $mock->shouldReceive('loadWorkflowLogData')->andReturnUsing(function () {
-            $this->loadWorkflowLogDataCalls++;
+        $mock->shouldReceive('loadWorkflowLogSummaryData')->andReturnUsing(function () {
+            $this->loadWorkflowLogSummaryDataCalls++;
 
             return $this->runLogs;
         });
@@ -81,8 +81,8 @@ describe('mount', function () {
 
     it('names the run that started a chained run', function () {
         $this->runLogs = collect([
-            componentRunLogData(id: 'parent-log', name: 'deploy'),
-            componentRunLogData(id: 'child-log', name: 'down', parent: 'parent-log'),
+            componentRunLogSummaryData(id: 'parent-log', name: 'deploy'),
+            componentRunLogSummaryData(id: 'child-log', name: 'down', parent: 'parent-log'),
         ]);
 
         Livewire::test(ProjectWorkflows::class, ['uuid' => $this->uuid, 'slug' => $this->slug])
@@ -107,7 +107,7 @@ describe('mount', function () {
         Livewire::test(ProjectWorkflows::class, ['uuid' => $this->uuid, 'slug' => $this->slug])
             ->assertRedirect(Project::getUrl(['uuid' => $this->uuid]));
 
-        expect($this->loadWorkflowLogDataCalls)->toBe(0);
+        expect($this->loadWorkflowLogSummaryDataCalls)->toBe(0);
     });
 });
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Events\GlobalRefresh;
 use App\Livewire\RefreshButton;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -17,6 +18,19 @@ describe('flushCache', function () {
         Livewire::test(RefreshButton::class)
             ->call('flushCache')
             ->assertOk();
+
+        expect(Cache::has('anything'))->toBeFalse();
+    });
+});
+
+describe('globalRefresh', function () {
+    it('empties the cache and reloads the page when the broadcast arrives', function () {
+        Cache::put('anything', 'from before the refresh');
+
+        Livewire::test(RefreshButton::class)
+            ->dispatch('native:'.GlobalRefresh::class)
+            ->assertOk()
+            ->assertJs('window.location.reload()');
 
         expect(Cache::has('anything'))->toBeFalse();
     });

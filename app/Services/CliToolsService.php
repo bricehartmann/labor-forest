@@ -3,13 +3,12 @@
 namespace App\Services;
 
 use App\Concerns\Services\ManagesFiles;
+use App\Concerns\Services\ResolvesWorkflowFiles;
 use App\Data\PendingCliCommandData;
-use App\Data\WorkflowStepData;
 use App\Enums\CliCommand;
 use App\Enums\Directory;
 use App\Enums\Disk;
 use App\Enums\File;
-use App\Enums\FileExtension;
 use App\Enums\QueryParameter;
 use App\Exceptions\InstallCliToolsFailed;
 use App\Exceptions\InvalidWorkflowFile;
@@ -26,6 +25,7 @@ use Throwable;
 class CliToolsService
 {
     use ManagesFiles;
+    use ResolvesWorkflowFiles;
 
     /**
      * Symlink the `lf` script into $path, and record that the tools have been installed.
@@ -117,7 +117,7 @@ class CliToolsService
 
         $workflow = $pending->workflow;
 
-        if (! $workflow || ! \Illuminate\Support\Facades\File::isFile($this->workflowFilePath($pending->path, $workflow))) {
+        if (! $workflow || ! $this->findWorkflowPath($pending->path, $workflow)) {
             return $this->dashboardUrl('Workflow does not exist.');
         }
 
@@ -134,7 +134,7 @@ class CliToolsService
             projectUuid: $projectData->uuid,
             workspacePath: $workspaceData->path,
             workflowName: $workflow,
-            stepHashes: $this->allStepHashes($workspaceData->path, $workflow),
+            stepHashes: null,
             parentLogId: null,
             timeoutSeconds: $settings->workflow_step_timeout_seconds,
         );
@@ -161,8 +161,10 @@ class CliToolsService
         }
 
         $workflow = $pending->workflow;
+        // held onto rather than resolved again below, so the file is looked for once
+        $workflowPath = $workflow ? $this->findWorkflowPath($pending->path, $workflow) : null;
 
-        if (! $workflow || ! \Illuminate\Support\Facades\File::isFile($this->workflowFilePath($pending->path, $workflow))) {
+        if ($workflowPath === null) {
             return $this->dashboardUrl('Workflow does not exist.');
         }
 
@@ -172,8 +174,6 @@ class CliToolsService
         if (! $projectData) {
             return $this->dashboardUrl('Project does not exist.');
         }
-
-        $workflowPath = $this->workflowFilePath($workspaceData->path, $workflow);
 
         try {
             app(WorkflowService::class)->loadWorkflow($workflowPath);
@@ -195,40 +195,12 @@ class CliToolsService
     }
 
     /**
-     * The path of the file defining a named workflow of the workspace rooted at $path.
-     */
-    private function workflowFilePath(string $path, string $workflow): string
-    {
-        return implode(DIRECTORY_SEPARATOR, [
-            $path,
-            Directory::BASE->value,
-            Directory::WORKFLOWS->value,
-            $workflow.'.'.FileExtension::YAML->value,
-        ]);
-    }
-
-    /**
      * The dashboard reads the message off the query string rather than the session, because the
      * callers run outside the window's own request and share no session with it.
      */
     private function dashboardUrl(string $error): string
     {
         return Dashboard::getUrl([QueryParameter::ERROR->value => $error]);
-    }
-
-    /**
-     * The hashes of every step of a workflow, so a run started from the CLI runs the whole thing.
-     *
-     * @return array<int, string>
-     *
-     * @throws InvalidWorkflowFile
-     */
-    private function allStepHashes(string $workspacePath, string $workflowName): array
-    {
-        return app(WorkflowService::class)
-            ->loadSteps($workspacePath, $workflowName)
-            ->map(fn (WorkflowStepData $step, int $index) => $step->hash((string) $index))
-            ->all();
     }
 
     /**

@@ -1,0 +1,15 @@
+resource_type: run_log
+steps:
+    - name: 'Build the image'
+      type: shell
+      exitCode: 0
+      output: "reordered-step-output\n"
+      run: 'docker compose build'
+      hash: ccc333
+
+id: 20240110T000000Z_repo-logs_reordered
+name: reordered
+parent: null
+timestamp: 1704844800
+status: success
+exception: null

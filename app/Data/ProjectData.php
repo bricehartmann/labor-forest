@@ -2,11 +2,12 @@
 
 namespace App\Data;
 
+use App\Contracts\McpResource;
 use App\Rules\ValidVariables;
 use Illuminate\Support\Str;
 use Spatie\LaravelData\Data;
 
-class ProjectData extends Data
+class ProjectData extends Data implements McpResource
 {
     public function __construct(
         public string $uuid,
@@ -58,6 +59,17 @@ class ProjectData extends Data
                 'string',
                 new ValidVariables,
             ],
+        ];
+    }
+
+    public function toMcpResource(): array
+    {
+        return [
+            ...$this->toArray(),
+            'dir_name' => $this->dirName(),
+            'parent_dir' => $this->parentDir(),
+            'slug_kebab' => $this->slugKebab(),
+            'slug_snake' => $this->slugSnake(),
         ];
     }
 }

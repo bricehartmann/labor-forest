@@ -34,9 +34,9 @@ class GitService
         }
 
         if ($this->doesBranchExist($mainWorktreePath, $branch) && ! $baseBranch) {
-            $command = 'git worktree add "'.$newWorktreePath.'" "'.$branch.'"';
+            $command = 'git worktree add '.escapeshellarg($newWorktreePath).' '.escapeshellarg($branch);
         } elseif ($baseBranch && $this->doesBranchExist($mainWorktreePath, $baseBranch)) {
-            $command = 'git worktree add -b "'.$branch.'" "'.$newWorktreePath.'" "'.$baseBranch.'"';
+            $command = 'git worktree add -b '.escapeshellarg($branch).' '.escapeshellarg($newWorktreePath).' '.escapeshellarg($baseBranch);
         } elseif ($baseBranch) {
             throw new GitBranchDoesNotExist($mainWorktreePath, $baseBranch);
         } else {
@@ -68,8 +68,8 @@ class GitService
         bool $forceDeleteBranch,
     ): void {
         $removeWorktreeCommand = $force
-            ? 'git worktree remove --force '.$worktreePath
-            : 'git worktree remove '.$worktreePath;
+            ? 'git worktree remove --force '.escapeshellarg($worktreePath)
+            : 'git worktree remove '.escapeshellarg($worktreePath);
         $removeWorktreeResult = $this->runGit($removeWorktreeCommand, $worktreePath);
 
         if ($removeWorktreeResult->failed()) {
@@ -77,8 +77,8 @@ class GitService
         }
 
         $deleteBranchCommand = match (true) {
-            $deleteBranch && $forceDeleteBranch => 'git branch --delete --force '.$branch,
-            $deleteBranch => 'git branch --delete '.$branch,
+            $deleteBranch && $forceDeleteBranch => 'git branch --delete --force '.escapeshellarg($branch),
+            $deleteBranch => 'git branch --delete '.escapeshellarg($branch),
             default => null,
         };
 
@@ -274,7 +274,7 @@ class GitService
 
     public function doesBranchExist(string $projectPath, string $branch): bool
     {
-        return $this->runGit('git show-ref --verify --quiet "refs/heads/'.$branch.'"', $projectPath)->successful();
+        return $this->runGit('git show-ref --verify --quiet '.escapeshellarg('refs/heads/'.$branch), $projectPath)->successful();
     }
 
     public function isGitRepository(string $path): bool

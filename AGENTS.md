@@ -34,7 +34,7 @@ LaborForest is a **NativePHP v2 (Electron) macOS desktop app** — a GUI for man
 ### State lives in YAML files, not the database
 
 - Global: `~/.laborforest/settings.yaml`, `~/.laborforest/projects.yaml`, and the transient `pending.yaml`, accessed via the `user_home` disk. Read-only app assets (`extras/bin/lf`, `extras/example-workflows/`) come from the `extras` disk. Both cases live in `app/Enums/Disk.php`; **both disks are registered at runtime by NativePHP** — they do not exist outside the native runtime and are not in `config/filesystems.php`.
-- Per-workspace: a `.laborforest/` directory inside each worktree holding `workflows/*.yaml` plus an `ignored/` subdirectory (git-ignored) holding `logs/*.yaml` and `status.yaml` (paths defined by enums `Directory` and `File`). A project may instead keep the whole `.laborforest` dir out of git via `.git/info/exclude` (`Directory::GIT_INFO` / `File::GIT_EXCLUDE`), in which case workflows are copied into a new worktree at creation time from the worktree the base branch is checked out in (`ProjectsService::seedWorkspaceWorkflowsFromBaseBranch()`, falling back to the primary dir). Nothing re-seeds on page load.
+- Per-workspace: a `.laborforest/` directory inside each worktree holding `workflows/*.yaml` (a hand-authored `.yml` is read too — `Concerns\Services\ResolvesWorkflowFiles` resolves a workflow name to whichever spelling exists, preferring `.yaml`, and `loadWorkflows()` drops a `.yml` whose `.yaml` sibling exists because both key on the same name) plus an `ignored/` subdirectory (git-ignored) holding `logs/*.yaml` and `status.yaml` (paths defined by enums `Directory` and `File`). A project may instead keep the whole `.laborforest` dir out of git via `.git/info/exclude` (`Directory::GIT_INFO` / `File::GIT_EXCLUDE`), in which case workflows are copied into a new worktree at creation time from the worktree the base branch is checked out in (`ProjectsService::seedWorkspaceWorkflowsFromBaseBranch()`, falling back to the primary dir). Nothing re-seeds on page load.
 - Workflow and run-log YAML files are recognized by their `resource_type` key (`app/Enums/YamlResourceType.php`), not by filename or location.
 - SQLite is used **only as the queue backend** — the sole domain migration is the jobs table. `app/Models/User.php` is an unused stub.
 - Every domain object is a `spatie/laravel-data` class in `app/Data/` with `rules()` that validate user-authored YAML (`ProjectData`, `WorkspaceData`, `WorkflowData`, `WorkflowRunLogData`, …). Some override `transform()` to keep generated YAML clean.
@@ -50,7 +50,7 @@ Filament page action (or the `lf` CLI, below) → `WorkflowService::dispatchWork
 
 A workflow file declares `require_status`, `ending_status`, `sort_order` and its `steps` (`app/Data/WorkflowData.php`). Whether it may run is decided in one place — `WorkspaceStatus::allowsWorkflowRequiring()` — and enforced in `WorkflowService::ensureWorkspaceCanRunWorkflow()` (throws `WorkflowNotRunnable`) rather than only by disabling the UI button, so a CLI-dispatched run cannot bypass it. Child `workflow` steps are deliberately exempt from the gate.
 
-Steps support `if`/`unless` shell gates and per-step `env`. Progress is pushed to the UI by broadcasting on the NativePHP channel (`app/Enums/BroadcastChannel.php`): `WorkflowStarted`, `WorkflowStepStarted/Finished/Skipped`, `WorkflowStepOutputUpdated` (throttled to 1/sec with a final flush), `WorkflowFinished`, plus `ProjectDataUpdated` for workspace-list refreshes. Final status = `ERROR` on failure, else the workflow's `ending_status`, else the status the workspace held before dispatch (`RunWorkflow::$statusBeforeRun`, since `dispatchWorkflow()` has already written `PENDING` by the time the job reads the file).
+Steps support `if`/`unless` shell gates and per-step `env`. A gate's exit code is only ever an answer — non-zero `if` or zero `unless` skips the step, never fails the run — but a gate that never reaches an exit code (it times out, or a `{{ }}` in it will not resolve) fails the step it guards. That, and a `shell` step killed by the timeout, is recorded as `WorkflowRunLogStepData::$failure_reason` (`app/Enums/WorkflowStepFailureReason.php`) beside a real `exitCode`, deliberately *not* as a `skip_reason`, because `status()` lets `skip_reason` win over `exitCode` and the step would render as skipped rather than failed. Without it the throwing step was stamped `aborted` by `markUnreachedStepsAborted()`, indistinguishable from the steps behind it that genuinely never ran. Progress is pushed to the UI by broadcasting on the NativePHP channel (`app/Enums/BroadcastChannel.php`): `WorkflowStarted`, `WorkflowStepStarted/Finished/Skipped`, `WorkflowStepOutputUpdated` (throttled to 1/sec with a final flush), `WorkflowFinished`, plus `ProjectDataUpdated` for workspace-list refreshes. Final status = `ERROR` on failure, else the workflow's `ending_status`, else the status the workspace held before dispatch (`RunWorkflow::$statusBeforeRun`, since `dispatchWorkflow()` has already written `PENDING` by the time the job reads the file).
 
 ### CLI tools (`lf`) and deep links
 
@@ -64,6 +64,23 @@ Both drain paths call `CliToolsService::runPendingCommand()`, which returns the 
 - **cold** — `NativeAppServiceProvider::boot()` drains the file *before* `Window::open()`. macOS fires open-url before the PHP server is listening and NativePHP's `notifyLaravel()` swallows the failure, so the event never arrives on a cold launch.
 
 `pullPendingCommand()` deletes `pending.yaml` before parsing it, so a malformed file cannot wedge every future launch and a deeplink arriving after the boot drain finds nothing left to run.
+
+### MCP server
+
+`routes/ai.php` registers one `Mcp::web` server (`app/Mcp/Servers/LaborForestServer.php`) at `McpEndpoint::LABORFOREST`. It is **not** served by the app window's process: `McpService::startMcpServer()` spawns a second Laravel HTTP server as a persistent NativePHP child — `artisan serve --no-reload --host=127.0.0.1 --port={mcp_port}` — with `LABORFOREST_MCP_SERVER=1` in its environment. `--no-reload` is load-bearing (see the docblock: ServeCommand's `$passthroughVariables` would otherwise drop every `NATIVEPHP_*` key from the process that actually answers requests).
+
+`artisan serve` serves the *whole* application, and the Filament panel sits at `->path('')` with no auth guard, so the security of that port is entirely in middleware:
+
+- `AppServiceProvider::allowExternalAccessToMcpServer()` **swaps** NativePHP's `PreventRegularBrowserAccess` for `AllowOnlyMcpRequests`, which 404s every path but the MCP endpoint. Swap, never remove — removing it publishes the app UI on the MCP port.
+- `EnsureMcpRequestIsLocal` rejects a `Host` or `Origin` that is not loopback. This is the MCP spec's DNS-rebinding requirement: rebinding makes an attacker's page same-origin, so no CORS preflight happens, but the attacker's name still travels in `Host`. A loopback `Origin` passes because `mcp:inspector` is a browser app.
+- `EnsureMcpTokenIsValid` compares `bearerToken()` against `SettingsData::$mcp_token` with `hash_equals`, 401 (not 403) so the package's `AddWwwAuthenticateHeader` reads as a challenge. A blank stored token denies everything.
+- `throttle:mcp`, defined in `AppServiceProvider::boot()`.
+
+The token is generated lazily by `McpService::startMcpServer()` and lives in `settings.yaml`, which `SettingsService::saveSettings()` writes `private` (0600). It is deliberately **not** encrypted: `APP_KEY` ships world-readable inside the app bundle and is identical on every install, so `encrypt()` would put the lock beside its key; the file mode is what actually excludes another account. `SettingsData::toMcpResource()` withholds the token so it never reaches a transcript.
+
+Defaults are closed: `mcp_enabled = false`, `mcp_read_only = true`. Read-only is enforced by `shouldRegister()` from `Concerns\Mcp\RegistersWhenWritable`, applied to every tool that changes anything — including the three `Launch*Tool`s, which spawn a user-configured command. The answer is memoized by `McpService::isReadOnly()`, and `McpService` is bound **scoped** in `AppServiceProvider::register()` for exactly that reason: without it, each of the 12 gated tools re-parses `settings.yaml` on every request. It fails open (an unreadable settings file publishes everything) so a broken file never looks like a deliberately short tool list.
+
+Tool annotations are what a client gates its confirmation prompts on, so they are not decorative: `run-workflow` is `#[IsDestructive]` because a step is arbitrary shell, the launch tools carry *no* annotation rather than `#[IsReadOnly]`, and `override-workspace-status` is `#[IsIdempotent]` so an agent clearing the `error` a failed run left behind does not have to interrupt the user.
 
 ### Services (`app/Services/`)
 
@@ -112,10 +129,10 @@ This application is a Laravel application and its main Laravel ecosystems packag
 - php - 8.4
 - filament/filament (FILAMENT) - v5
 - laravel/framework (LARAVEL) - v13
+- laravel/mcp (MCP) - v0
 - laravel/prompts (PROMPTS) - v0
 - livewire/livewire (LIVEWIRE) - v4
 - laravel/boost (BOOST) - v2
-- laravel/mcp (MCP) - v0
 - laravel/pail (PAIL) - v1
 - laravel/pint (PINT) - v1
 - pestphp/pest (PEST) - v5
@@ -207,6 +224,13 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 # Deployment
 
 - Laravel can be deployed using [Laravel Cloud](https://cloud.laravel.com/), which is the fastest way to deploy and scale production Laravel applications.
+
+=== tests rules ===
+
+# Test Enforcement
+
+- Every change must be programmatically tested. Write a new test or update an existing test, then run the affected tests to make sure they pass.
+- Run the minimum number of tests needed to ensure code quality and speed. Use `php artisan test --compact` with a specific filename or filter.
 
 === laravel/core rules ===
 

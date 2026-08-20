@@ -1,0 +1,10 @@
+resource_type: run_log
+steps: [
+    { name: 'Pull the image', type: shell, exitCode: 0, output: "flow-step-output\n", run: 'docker compose pull', hash: ddd444 }
+]
+id: 20240111T000000Z_repo-logs_flow
+name: flow
+parent: null
+timestamp: 1704931200
+status: success
+exception: null

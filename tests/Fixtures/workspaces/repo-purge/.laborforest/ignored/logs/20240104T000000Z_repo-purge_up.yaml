@@ -1,0 +1,14 @@
+resource_type: run_log
+id: 20240104T000000Z_repo-purge_up
+name: up
+parent: null
+timestamp: 1704326400
+status: running
+exception: null
+steps:
+    - name: 'Step one'
+      type: shell
+      exitCode: 0
+      output: "done\n"
+      run: 'echo done'
+      hash: aaa111

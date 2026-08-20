@@ -20,7 +20,7 @@ class SettingsService
     public function loadSettings(): SettingsData
     {
         $this->ensureBaseDirectoryExists();
-        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump(SettingsData::defaults()->toArray(), inline: 10));
+        $this->ensureBaseFileExists(File::SETTINGS->value, Yaml::dump(SettingsData::defaults()->toArray(), inline: 10), private: true);
 
         $path = $this->makeRelativeBasePath(File::SETTINGS->value);
 
@@ -44,10 +44,18 @@ class SettingsService
         }
     }
 
+    /**
+     * Write the settings file, readable only by the user who owns it.
+     *
+     * The file holds the MCP bearer token. Encrypting it would not help — APP_KEY ships in the
+     * application bundle, world-readable and identical on every install, so the same reader who
+     * can open this file can open the key beside it. The file mode is what actually excludes
+     * another account on the machine.
+     */
     public function saveSettings(SettingsData $settings): void
     {
         $this->ensureBaseDirectoryExists();
-        $this->putBaseFile(File::SETTINGS->value, Yaml::dump($settings->toArray(), inline: 10));
+        $this->putBaseFile(File::SETTINGS->value, Yaml::dump($settings->toArray(), inline: 10), private: true);
     }
 
     /**

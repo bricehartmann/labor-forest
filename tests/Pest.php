@@ -4,10 +4,12 @@ use App\Data\ProjectData;
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkflowRunLogSummaryData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\GitStatus;
 use App\Enums\WorkflowStatus;
+use App\Enums\WorkflowStepFailureReason;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
@@ -169,10 +171,14 @@ function componentStepData(
     string $name = 'Install dependencies',
     string $run = 'composer install',
     WorkflowStepType $type = WorkflowStepType::SHELL,
+    ?string $if = null,
+    ?string $unless = null,
 ): WorkflowStepData {
     return new WorkflowStepData(
         name: $name,
         type: $type,
+        if: $if,
+        unless: $unless,
         run: $run,
     );
 }
@@ -203,6 +209,27 @@ function componentRunLogData(
 }
 
 /**
+ * A run log without its steps, as the run log lists hydrate them.
+ */
+function componentRunLogSummaryData(
+    string $id = '20240101T000000Z_repo-feature_up',
+    string $name = 'up',
+    ?string $parent = null,
+    int $timestamp = 1704067200,
+    WorkflowStatus $status = WorkflowStatus::SUCCESS,
+    ?string $exception = null,
+): WorkflowRunLogSummaryData {
+    return new WorkflowRunLogSummaryData(
+        id: $id,
+        name: $name,
+        parent: $parent,
+        timestamp: $timestamp,
+        status: $status,
+        exception: $exception,
+    );
+}
+
+/**
  * A single step of a run log, by default a shell step that succeeded.
  */
 function componentRunLogStepData(
@@ -212,6 +239,7 @@ function componentRunLogStepData(
     string $output = 'done',
     ?string $hash = 'aaa111',
     ?WorkflowStepSkipReason $skipReason = null,
+    ?WorkflowStepFailureReason $failureReason = null,
     ?string $run = 'composer install',
     ?string $logId = null,
 ): WorkflowRunLogStepData {
@@ -221,8 +249,30 @@ function componentRunLogStepData(
         exitCode: $exitCode,
         output: $output,
         skip_reason: $skipReason,
+        failure_reason: $failureReason,
         run: $run,
         hash: $hash,
         log_id: $logId,
     );
+}
+
+/**
+ * A successful JSON-RPC reply to `initialize`, shaped as Laravel\Mcp\Server\Methods\Initialize returns it.
+ *
+ * @return array<string, mixed>
+ */
+function mcpInitializeReplyPayload(
+    string $name = 'LaborForest',
+    string $version = '1.2.3',
+    string $protocol = '2025-11-25',
+): array {
+    return [
+        'jsonrpc' => '2.0',
+        'id' => 1,
+        'result' => [
+            'protocolVersion' => $protocol,
+            'capabilities' => ['resources' => []],
+            'serverInfo' => ['name' => $name, 'version' => $version],
+        ],
+    ];
 }

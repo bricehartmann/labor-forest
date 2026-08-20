@@ -1,6 +1,6 @@
 resource_type: workflow
 sort_order: 2
 steps:
-    - name: 'Wrong extension'
+    - name: 'Not a yaml file at all'
       type: shell
       run: 'true'

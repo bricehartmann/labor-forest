@@ -41,7 +41,11 @@ describe('loadSettings', function () {
 
         expect($settings->dark_mode)->toBeFalse()
             ->and($settings->command_launch_ide)->toBe(SettingsData::defaults()->command_launch_ide)
-            ->and($settings->workflow_step_timeout_seconds)->toBe(600);
+            ->and($settings->workflow_step_timeout_seconds)->toBe(600)
+            // a settings file written before the mcp server existed opts into nothing
+            ->and($settings->mcp_enabled)->toBeFalse()
+            ->and($settings->mcp_read_only)->toBeTrue()
+            ->and($settings->mcp_port)->toBe(9189);
     });
 
     it('returns the defaults for an empty file rather than throwing', function () {
@@ -71,6 +75,35 @@ describe('loadSettings', function () {
             ->toThrow(InvalidSettingsFile::class, 'workflow step timeout seconds');
     });
 
+    it('throws when the mcp switch is not a boolean', function () {
+        $this->disk->put($this->path, settingsYaml(['mcp_enabled' => 'sure']));
+
+        expect(fn () => $this->settings->loadSettings())
+            ->toThrow(InvalidSettingsFile::class, 'mcp enabled');
+    });
+
+    it('throws when the mcp port is outside the range a server can be reached on', function (mixed $port) {
+        // the same bounds the settings screen enforces, so a hand-edited file cannot name a port the
+        // form would have refused
+        $this->disk->put($this->path, settingsYaml(['mcp_port' => $port]));
+
+        expect(fn () => $this->settings->loadSettings())
+            ->toThrow(InvalidSettingsFile::class, 'mcp port');
+    })->with([
+        'not a number' => ['nine thousand'],
+        'below the first unprivileged port' => [1023],
+        'above the last registered port' => [49152],
+    ]);
+
+    it('reads an mcp port at either end of the range', function (int $port) {
+        $this->disk->put($this->path, settingsYaml(['mcp_port' => $port]));
+
+        expect($this->settings->loadSettings()->mcp_port)->toBe($port);
+    })->with([
+        'first' => [1024],
+        'last' => [49151],
+    ]);
+
     it('reports every validation problem at once', function () {
         $this->disk->put($this->path, settingsYaml([
             'dark_mode' => 'nope',
@@ -98,6 +131,10 @@ describe('saveSettings', function () {
             'dark_mode' => false,
             'cli_tools_installed' => false,
             'workflow_step_timeout_seconds' => 45,
+            'mcp_enabled' => false,
+            'mcp_port' => 9189,
+            'mcp_read_only' => true,
+            'mcp_token' => null,
             'command_launch_ide' => null,
             'command_launch_browser' => null,
             'command_launch_terminal' => null,
@@ -124,10 +161,17 @@ describe('syncSettingsFile', function () {
         expect($written)->toHaveKeys([
             'dark_mode',
             'workflow_step_timeout_seconds',
+            'mcp_enabled',
+            'mcp_port',
+            'mcp_read_only',
+            'mcp_token',
             'command_launch_ide',
             'command_launch_browser',
             'command_launch_terminal',
-        ])->and($written['dark_mode'])->toBeFalse();
+        ])->and($written['dark_mode'])->toBeFalse()
+            // the upgrade path for a settings file written before the mcp server existed
+            ->and($written['mcp_enabled'])->toBe(SettingsData::defaults()->mcp_enabled)
+            ->and($written['mcp_port'])->toBe(SettingsData::defaults()->mcp_port);
     });
 
     it('throws and leaves the file untouched when it is invalid', function () {

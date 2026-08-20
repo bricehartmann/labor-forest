@@ -4,7 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Data\ProjectData;
-use App\Data\WorkflowRunLogData;
+use App\Data\WorkflowRunLogSummaryData;
 use App\Data\WorkspaceData;
 use App\Enums\Directory;
 use App\Enums\FileExtension;
@@ -73,7 +73,7 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
     #[Computed]
     public function workflowLogData(): Collection
     {
-        return app(WorkflowService::class)->loadWorkflowLogData($this->workspaceData);
+        return app(WorkflowService::class)->loadWorkflowLogSummaryData($this->workspaceData);
     }
 
     /**
@@ -86,7 +86,7 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
     public function workflowNamesByLogId(): array
     {
         return $this->workflowLogData
-            ->mapWithKeys(fn (WorkflowRunLogData $workflowRunLogData) => [$workflowRunLogData->id => $workflowRunLogData->name])
+            ->mapWithKeys(fn (WorkflowRunLogSummaryData $workflowRunLogData) => [$workflowRunLogData->id => $workflowRunLogData->name])
             ->all();
     }
 
@@ -146,16 +146,6 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
         } catch (Exception $e) {
             $this->loadedInvalidMessage = $e->getMessage();
         }
-    }
-
-    /**
-     * @return array<string, array<string, int>> workspace path => (workflow name => sort order)
-     */
-    protected function loadWorkspaceWorkflowLogData(): array
-    {
-        $workflowService = app(WorkflowService::class);
-
-        return $workflowService->loadWorkflowLogData($this->workspaceData)->all();
     }
 
     public static function getSlug($panel = null): string
@@ -233,7 +223,8 @@ class ProjectWorkflows extends Page implements HasActions, HasSchemas, HasTable
                                     Directory::IGNORED->value,
                                     Directory::LOGS->value,
                                 ]);
-                                $paths = $records->map(fn (array $record) => $pathPrefix.'/'.WorkflowRunLogData::from($record)->id.'.'.FileExtension::YAML->value
+                                $paths = $records->map(
+                                    fn (array $record) => $pathPrefix.'/'.$record['id'].'.'.FileExtension::YAML->value
                                 )->toArray();
 
                                 if (! File::delete($paths)) {

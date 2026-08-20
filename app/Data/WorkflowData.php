@@ -38,19 +38,26 @@ class WorkflowData extends Data
             'require_status' => [
                 'nullable',
                 'string',
-                Rule::in([
-                    WorkspaceStatus::READY->value,
-                    WorkspaceStatus::SUSPENDED->value,
-                ]),
+                Rule::in(WorkspaceStatus::declarableInWorkflowValues()),
             ],
             'ending_status' => [
                 'nullable',
                 'string',
-                Rule::in([
-                    WorkspaceStatus::READY->value,
-                    WorkspaceStatus::SUSPENDED->value,
-                ]),
+                Rule::in(WorkspaceStatus::declarableInWorkflowValues()),
             ],
         ];
+    }
+
+    /**
+     * The hash of every step, in order — the selection meaning "run the whole workflow".
+     *
+     * @return array<int, string>
+     */
+    public function stepHashes(): array
+    {
+        return $this->steps
+            ->values()
+            ->map(fn (WorkflowStepData $step, int $index) => $step->hash((string) $index))
+            ->all();
     }
 }

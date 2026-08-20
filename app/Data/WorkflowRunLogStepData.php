@@ -2,6 +2,7 @@
 
 namespace App\Data;
 
+use App\Enums\WorkflowStepFailureReason;
 use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepStatus;
 use App\Enums\WorkflowStepType;
@@ -26,6 +27,9 @@ class WorkflowRunLogStepData extends Data
         public string $output,
         #[WithCast(EnumCast::class)]
         public ?WorkflowStepSkipReason $skip_reason = null,
+        /** Why the step failed, when it failed without its own command producing an exit code. */
+        #[WithCast(EnumCast::class)]
+        public ?WorkflowStepFailureReason $failure_reason = null,
         public ?array $env = null,
         public ?string $if = null,
         public ?string $unless = null,

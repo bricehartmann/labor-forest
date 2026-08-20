@@ -4,26 +4,35 @@ namespace App\Filament\Pages;
 
 use App\Concerns\Filament\Pages\HasResultNotificationOperations;
 use App\Concerns\Filament\Pages\NormalizesLaunchCommands;
+use App\Data\McpServerHealthData;
 use App\Data\SettingsData;
+use App\Enums\McpEndpoint;
 use App\Enums\Variable;
 use App\Exceptions\InvalidSettingsFile;
+use App\Exceptions\McpServerUnhealthy;
 use App\Rules\ValidVariables;
+use App\Services\McpService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\KeyValueEntry;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Alignment;
+use Filament\Support\Enums\FontFamily;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\HtmlString;
 use Livewire\Attributes\Locked;
+use Throwable;
 
 class Settings extends Page
 {
@@ -34,6 +43,15 @@ class Settings extends Page
 
     #[Locked]
     public ?string $loadedInvalidMessage = null;
+
+    /**
+     * The bearer token the connect command carries.
+     *
+     * Held on the page rather than in the form, because it is not something the user edits and a
+     * form field would carry it into every saved settings write for no reason.
+     */
+    #[Locked]
+    public ?string $mcpToken = null;
 
     protected string $view = 'filament.pages.settings';
 
@@ -47,6 +65,8 @@ class Settings extends Page
             $settings = new SettingsData;
             $this->loadedInvalidMessage = $e->messagesAsString();
         }
+
+        $this->mcpToken = $settings->mcp_token;
 
         $this->form->fill($settings->toArray());
     }
@@ -77,6 +97,60 @@ class Settings extends Page
                                     ->inline(false)
                                     ->label('Enable dark mode'),
                             ]),
+                    ]),
+                Section::make('MCP')
+                    ->description('Configure the local MCP server.')
+                    ->extraAttributes(['class' => 'h-full [&>.fi-section]:flex-1'])
+                    ->schema([
+                        Grid::make(4)
+                            ->schema([
+                                Toggle::make('mcp_enabled')
+                                    ->label('Enable MCP')
+                                    ->inline(false)
+                                    ->live(),
+                                Toggle::make('mcp_read_only')
+                                    ->label('Read only')
+                                    ->disabled(fn (Get $get) => ! $get('mcp_enabled'))
+                                    ->inline(false),
+                                TextInput::make('mcp_port')
+                                    ->disabled(fn (Get $get) => ! $get('mcp_enabled'))
+                                    ->label('MCP local port')
+                                    ->numeric()
+                                    ->minValue(1024)
+                                    ->maxValue(49151)
+                                    ->required()
+                                    // The endpoint below is rebuilt from this value, so it
+                                    // has to reach the server before the form is saved.
+                                    ->live(onBlur: true),
+                                Actions::make([
+                                    Action::make('test_mcp_connection')
+                                        ->label('Test connection')
+                                        ->button()
+                                        ->icon(Heroicon::Bolt)
+                                        ->action(fn (Get $get) => $this->testMcpConnection($get->integer('mcp_port'))),
+                                ])
+                                    ->alignEnd()
+                                    ->verticallyAlignEnd(),
+                            ]),
+                        TextEntry::make('mcp_claude_command')
+                            ->label('Add to Claude Code')
+                            ->helperText('Run this in a terminal to register the server. It carries the bearer token, so treat it as a secret. Click to copy.')
+                            ->visible(fn (Get $get): bool => (bool) $get('mcp_enabled') && filled($get('mcp_port')))
+                            ->state(fn (Get $get): string => McpEndpoint::LABORFOREST->claudeAddCommand($get->integer('mcp_port'), $this->mcpToken))
+                            ->fontFamily(FontFamily::Mono)
+                            ->copyable()
+                            ->copyMessage('Command copied'),
+                        Actions::make([
+                            Action::make('regenerate_mcp_token')
+                                ->label('Regenerate token')
+                                ->icon(Heroicon::ArrowPath)
+                                ->link()
+                                ->requiresConfirmation()
+                                ->modalHeading('Regenerate the MCP token?')
+                                ->modalDescription('Every client registered with the current token stops working until it is added again with the new one.')
+                                ->action(fn () => $this->regenerateMcpToken()),
+                        ])
+                            ->visible(fn (Get $get): bool => (bool) $get('mcp_enabled')),
                     ]),
                 Section::make('Launch commands')
                     ->description(new HtmlString('Commands that are run to launch an application with a specific workspace\'s directory or local site.<br/>Each command can be overridden at the project level.'))
@@ -158,6 +232,8 @@ class Settings extends Page
     {
         $data = $this->form->getState();
 
+        $previousSettings = rescue(fn () => app(SettingsService::class)->loadSettings());
+
         static::resultNotificationOperation(
             callback: function () use ($data) {
                 $settingsService = app(SettingsService::class);
@@ -171,6 +247,96 @@ class Settings extends Page
         );
 
         $this->applyTheme((bool) ($data['dark_mode'] ?? false));
+
+        $this->syncMcpServer($previousSettings, $data);
+    }
+
+    /**
+     * Bring the MCP server in line with the settings that were just written.
+     *
+     * Only a real change acts, so saving an unrelated setting leaves a healthy server alone. A
+     * changed port has to go through a stop and a start rather than a restart, because the runtime
+     * replays the argv a process was started with and would keep serving the old port.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function syncMcpServer(?SettingsData $previousSettings, array $data): void
+    {
+        $enabled = (bool) ($data['mcp_enabled'] ?? false);
+        $port = (int) ($data['mcp_port'] ?? 0);
+
+        $wasEnabled = $previousSettings?->mcp_enabled ?? false;
+
+        $operation = match (true) {
+            $enabled && ! $wasEnabled => fn (McpService $mcp) => $mcp->startMcpServer(),
+            $enabled && $port !== $previousSettings?->mcp_port => fn (McpService $mcp) => $mcp->restartMcpServer(),
+            ! $enabled && $wasEnabled => fn (McpService $mcp) => $mcp->stopMcpServer(),
+            default => null,
+        };
+
+        if ($operation === null) {
+            return;
+        }
+
+        static::resultNotificationOperation(
+            callback: fn () => $operation(app(McpService::class)),
+            successTitle: null,
+            failureTitle: 'The MCP server could not be updated.',
+            failureBody: fn (Throwable $th): string => $th->getMessage(),
+        );
+    }
+
+    /**
+     * Report whether the endpoint the form currently names answers as this application's MCP server.
+     *
+     * The port comes from the form rather than from the saved settings, because the URL shown beside
+     * the button is built from that same value — a check that quietly probed a different port would
+     * be worse than no check at all. An unsaved port therefore reports what a client would find right
+     * now, which for a port nothing is serving yet is nothing.
+     *
+     * Reporting is switched off: every throwable this can produce is the diagnosis the user asked
+     * for rather than a defect, and a user retrying a stopped server would otherwise fill the log.
+     */
+    /**
+     * Write a new bearer token and restart the server so the running process reads it.
+     *
+     * The token is only consulted per request, so a restart is not strictly needed — but a token
+     * that has changed under a running server is exactly the state a user would not think to
+     * suspect, and the restart costs nothing.
+     */
+    protected function regenerateMcpToken(): void
+    {
+        static::resultNotificationOperation(
+            callback: function (): void {
+                $mcp = app(McpService::class);
+
+                $this->mcpToken = $mcp->regenerateMcpToken();
+
+                rescue(fn () => $mcp->restartMcpServer());
+            },
+            successTitle: 'MCP token regenerated',
+            successBody: 'Add the server to your MCP clients again with the new command.',
+            failureTitle: 'The MCP token could not be regenerated.',
+            failureBody: fn (Throwable $th): string => $th->getMessage(),
+        );
+    }
+
+    protected function testMcpConnection(int $port): void
+    {
+        static::resultNotificationOperation(
+            callback: fn (): McpServerHealthData => app(McpService::class)->checkMcpServer($port),
+            report: false,
+            successTitle: fn (McpServerHealthData $health): string => $health->status->title(),
+            successBody: fn (McpServerHealthData $health): string => $health->description(),
+            successIcon: fn (McpServerHealthData $health): BackedEnum => $health->status->icon(),
+            failureTitle: fn (Throwable $th): string => $th instanceof McpServerUnhealthy
+                ? $th->status->title()
+                : 'Whoops! Something went wrong.',
+            failureBody: fn (Throwable $th): string => $th->getMessage(),
+            failureIcon: fn (Throwable $th): BackedEnum => $th instanceof McpServerUnhealthy
+                ? $th->status->icon()
+                : Heroicon::XCircle,
+        );
     }
 
     /**

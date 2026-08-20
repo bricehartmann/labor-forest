@@ -1,0 +1,8 @@
+resource_type: workflow
+require_status: ready
+ending_status: suspended
+sort_order: 100
+steps:
+    - name: 'Only written with the yaml spelling'
+      type: shell
+      run: 'true'

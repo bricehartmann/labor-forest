@@ -3,13 +3,16 @@
 use App\Data\WorkflowData;
 use App\Data\WorkflowRunLogData;
 use App\Data\WorkflowRunLogStepData;
+use App\Data\WorkflowRunLogSummaryData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
 use App\Enums\GitStatus;
 use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
+use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Exceptions\WorkflowLogsNotDeleted;
 use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Jobs\RunWorkflow;
@@ -390,6 +393,17 @@ describe('dispatchWorkflow', function () {
             ->and($job->statusBeforeRun)->toBe(WorkspaceStatus::SUSPENDED);
     });
 
+    it('runs every step of the workflow when no step selection is given', function () {
+        $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'up', null, null, 600);
+
+        $everyStepHash = $this->workflows->loadSteps($this->fixturePath, 'up')
+            ->map(fn (WorkflowStepData $step, int $index) => $step->hash((string) $index))
+            ->all();
+
+        expect($everyStepHash)->toHaveCount(2)
+            ->and(Queue::pushed(RunWorkflow::class)->sole()->stepHashes)->toBe($everyStepHash);
+    });
+
     it('hands the job the status the run was dispatched from, not the pending one it writes', function () {
         $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'up', [], null, 600);
 
@@ -483,9 +497,47 @@ describe('ensureWorkspaceCanRunWorkflow', function () {
     ]);
 });
 
+describe('workflowPath', function () {
+    beforeEach(function () {
+        $this->fixturePath = fixtureWorkspacePath('repo-extensions');
+    });
+
+    it('resolves a workflow written with the yaml extension', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'down'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/down.yaml');
+    });
+
+    it('resolves a workflow written with the yml extension', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'refresh'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/refresh.yml');
+    });
+
+    it('prefers the yaml spelling when a workspace holds both', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'up'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/up.yaml');
+    });
+
+    it('falls back to the yaml spelling when the workflow does not exist', function () {
+        expect($this->workflows->workflowPath($this->fixturePath, 'nope'))
+            ->toBe($this->fixturePath.'/.laborforest/workflows/nope.yaml');
+    });
+});
+
 describe('loadSteps', function () {
     beforeEach(function () {
         $this->fixturePath = fixtureWorkspacePath('repo-feature');
+    });
+
+    it('returns the steps of a workflow written with the yml extension', function () {
+        $steps = $this->workflows->loadSteps(fixtureWorkspacePath('repo-extensions'), 'refresh');
+
+        expect($steps->pluck('name')->all())->toBe(['Loaded from the yml spelling']);
+    });
+
+    it('returns the steps of the yaml spelling when a workspace holds both', function () {
+        $steps = $this->workflows->loadSteps(fixtureWorkspacePath('repo-extensions'), 'up');
+
+        expect($steps->pluck('name')->all())->toBe(['Loaded from the yaml spelling']);
     });
 
     it('returns the steps of the named workflow file', function () {
@@ -545,6 +597,25 @@ describe('loadWorkflows', function () {
         'no steps' => ['empty-steps'],
     ]);
 
+    it('loads a workflow written with the yml extension', function () {
+        $workflows = $this->workflows->loadWorkflows(fixtureWorkspacePath('repo-extensions'));
+
+        expect($workflows->keys()->all())->toContain('refresh')
+            ->and($workflows->get('refresh')->steps->pluck('name')->all())->toBe(['Loaded from the yml spelling']);
+    });
+
+    /**
+     * Both spellings key on the same name, so the loser has to be dropped before the collection is
+     * built rather than left to whichever order the directory happens to be read in.
+     */
+    it('ignores a yml file whose yaml sibling exists', function () {
+        $workflows = $this->workflows->loadWorkflows(fixtureWorkspacePath('repo-extensions'));
+
+        expect($workflows->keys()->all())->toBe(['up', 'refresh', 'down'])
+            ->and($workflows->get('up')->sort_order)->toBe(0)
+            ->and($workflows->get('up')->steps->pluck('name')->all())->toBe(['Loaded from the yaml spelling']);
+    });
+
     it('returns an empty collection when the workflows directory does not exist', function () {
         File::partialMock()->shouldReceive('isDirectory')->andReturnFalse();
 
@@ -559,29 +630,65 @@ describe('loadWorkflows', function () {
     });
 });
 
-describe('loadWorkflowLogData', function () {
+describe('loadWorkflowLogSummaryData', function () {
     beforeEach(function () {
         $this->logsWorkspace = workflowWorkspaceData(fixtureWorkspacePath('repo-logs'));
     });
 
     it('returns the run logs newest first, re-indexed from zero', function () {
-        $logs = $this->workflows->loadWorkflowLogData($this->logsWorkspace);
+        $logs = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace);
 
-        expect($logs)->toHaveCount(2)
-            ->and($logs->keys()->all())->toBe([0, 1])
-            ->and($logs->first())->toBeInstanceOf(WorkflowRunLogData::class)
+        expect($logs)->toHaveCount(5)
+            ->and($logs->keys()->all())->toBe([0, 1, 2, 3, 4])
+            ->and($logs->first())->toBeInstanceOf(WorkflowRunLogSummaryData::class)
             ->and($logs->pluck('id')->all())->toBe([
+                '20240111T000000Z_repo-logs_flow',
+                '20240110T000000Z_repo-logs_reordered',
+                '20240109T000000Z_repo-logs_stream',
                 '20240102T000000Z_repo-logs_down',
                 '20240101T000000Z_repo-logs_up',
             ])
-            ->and($logs->pluck('timestamp')->all())->toBe([1704153600, 1704067200])
-            ->and($logs->first()->status)->toBe(WorkflowStatus::FAILED)
-            ->and($logs->first()->parent)->toBe('20240101T000000Z_repo-logs_up')
-            ->and($logs->first()->steps->first()->exitCode)->toBe(1);
+            ->and($logs->pluck('timestamp')->all())->toBe([1704931200, 1704844800, 1704758400, 1704153600, 1704067200])
+            ->and($logs->firstWhere('id', '20240102T000000Z_repo-logs_down')->status)->toBe(WorkflowStatus::FAILED)
+            ->and($logs->firstWhere('id', '20240102T000000Z_repo-logs_down')->parent)->toBe('20240101T000000Z_repo-logs_up')
+            ->and($logs->firstWhere('id', '20240102T000000Z_repo-logs_down')->exception)->toBe('Step [Stop the containers] failed.');
+    });
+
+    it('names its resource type the way the log files do', function () {
+        $log = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)
+            ->firstWhere('id', '20240101T000000Z_repo-logs_up');
+
+        expect($log->toArray())->toHaveKey('resource_type', YamlResourceType::WORKFLOW_RUN_LOG->value)
+            ->and($log->toArray())->not->toHaveKey('steps');
+    });
+
+    it('never reads the steps of a run, so a run whose steps are unparseable still lists', function () {
+        $id = '20240109T000000Z_repo-logs_stream';
+
+        expect($this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)->pluck('id')->all())->toContain($id)
+            ->and($this->workflows->loadWorkflowLogDatum($this->logsWorkspace, $id))->toBeNull();
+    });
+
+    it('reads a log that puts its steps before the rest of its keys', function () {
+        $log = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)
+            ->firstWhere('id', '20240110T000000Z_repo-logs_reordered');
+
+        expect($log)->toBeInstanceOf(WorkflowRunLogSummaryData::class)
+            ->and($log->name)->toBe('reordered')
+            ->and($log->status)->toBe(WorkflowStatus::SUCCESS);
+    });
+
+    it('falls back to a full parse for a log whose steps the header strip cannot skip', function () {
+        $log = $this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)
+            ->firstWhere('id', '20240111T000000Z_repo-logs_flow');
+
+        expect($log)->toBeInstanceOf(WorkflowRunLogSummaryData::class)
+            ->and($log->name)->toBe('flow')
+            ->and($log->status)->toBe(WorkflowStatus::SUCCESS);
     });
 
     it('drops a log file it cannot turn into a run log', function (string $id) {
-        expect($this->workflows->loadWorkflowLogData($this->logsWorkspace)->pluck('id')->all())->not->toContain($id);
+        expect($this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace)->pluck('id')->all())->not->toContain($id);
     })->with([
         'name outside the id pattern' => ['notalog'],
         'not parseable yaml' => ['20240103T000000Z_repo-logs_broken'],
@@ -594,11 +701,11 @@ describe('loadWorkflowLogData', function () {
     it('returns an empty collection when the logs directory does not exist', function () {
         File::partialMock()->shouldReceive('isDirectory')->andReturnFalse();
 
-        expect($this->workflows->loadWorkflowLogData($this->logsWorkspace))->toBeEmpty();
+        expect($this->workflows->loadWorkflowLogSummaryData($this->logsWorkspace))->toBeEmpty();
     });
 
     it('returns an empty collection when every log file is unusable', function () {
-        expect($this->workflows->loadWorkflowLogData(workflowWorkspaceData(fixtureWorkspacePath('repo-badlogs'))))->toBeEmpty();
+        expect($this->workflows->loadWorkflowLogSummaryData(workflowWorkspaceData(fixtureWorkspacePath('repo-badlogs'))))->toBeEmpty();
     });
 });
 
@@ -644,6 +751,98 @@ describe('loadWorkflowLogDatum', function () {
     ]);
 });
 
+describe('purgeWorkflowLogs', function () {
+    beforeEach(function () {
+        $this->purgeWorkspace = workflowWorkspaceData(fixtureWorkspacePath('repo-purge'));
+        $this->purgeLogsPath = fixtureWorkspacePath('repo-purge').'/.laborforest/ignored/logs';
+        $this->deletedPaths = null;
+        $this->deleteSucceeds = true;
+
+        // The fixture logs are committed and read-only, so only the delete is intercepted; every
+        // other File call, including the reads the summaries are built from, still hits disk
+        File::partialMock()
+            ->shouldReceive('delete')
+            ->andReturnUsing(function (array $paths) {
+                $this->deletedPaths = $paths;
+
+                return $this->deleteSucceeds;
+            });
+    });
+
+    it('deletes the finished runs of the named workflow alone', function () {
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'up'))
+            ->toBe(['purged' => 2, 'skipped' => 2])
+            ->and($this->deletedPaths)->toBe([
+                $this->purgeLogsPath.'/20240102T000000Z_repo-purge_up.yaml',
+                $this->purgeLogsPath.'/20240101T000000Z_repo-purge_up.yaml',
+            ]);
+    });
+
+    it('leaves the runs of another workflow in the same workspace alone', function () {
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'down'))
+            ->toBe(['purged' => 1, 'skipped' => 0])
+            ->and($this->deletedPaths)->toBe([
+                $this->purgeLogsPath.'/20240103T000000Z_repo-purge_down.yaml',
+            ]);
+    });
+
+    it('purges nothing for a workflow name matching no run log', function () {
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'nope'))
+            ->toBe(['purged' => 0, 'skipped' => 0])
+            ->and($this->deletedPaths)->toBeNull();
+    });
+
+    it('deletes nothing when every matching run is still in progress', function () {
+        // the delete would fail if it were reached, proving the skipped count is not a deleted one
+        $this->deleteSucceeds = false;
+
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'stuck'))
+            ->toBe(['purged' => 0, 'skipped' => 1])
+            ->and($this->deletedPaths)->toBeNull();
+    });
+
+    it('reads no logs from a workspace whose logs directory does not exist', function () {
+        expect($this->workflows->purgeWorkflowLogs(workflowWorkspaceData('/tmp/repo-feature'), 'up'))
+            ->toBe(['purged' => 0, 'skipped' => 0])
+            ->and($this->deletedPaths)->toBeNull();
+    });
+
+    it('throws when the log files cannot be deleted', function () {
+        $this->deleteSucceeds = false;
+
+        expect(fn () => $this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'up'))
+            ->toThrow(WorkflowLogsNotDeleted::class, 'Failed to delete the log records of workflow [up].');
+    });
+});
+
+describe('stepHashes', function () {
+    it('hashes every step by the position it holds in the workflow', function () {
+        $steps = [componentStepData(), componentStepData(name: 'Migrate', run: 'php artisan migrate')];
+
+        expect(componentWorkflowData($steps)->stepHashes())
+            ->toBe([$steps[0]->hash('0'), $steps[1]->hash('1')]);
+    });
+
+    it('hashes a step by its position rather than its key', function () {
+        // the steps of a workflow read back from yaml are re-indexed before they are hashed, so a
+        // gap in the keys cannot shift a step's hash away from the one the run log carries
+        $step = componentStepData();
+
+        $workflow = new WorkflowData(
+            require_status: null,
+            ending_status: WorkspaceStatus::READY,
+            sort_order: 0,
+            steps: collect([3 => $step]),
+        );
+
+        expect($workflow->stepHashes())->toBe([$step->hash('0')]);
+    });
+
+    it('hashes nothing for a workflow with no steps', function () {
+        expect(componentWorkflowData([])->stepHashes())->toBe([]);
+    });
+});
+
 describe('loadWorkflow', function () {
     it('hydrates a workflow from its file', function () {
         $workflow = $this->workflows->loadWorkflow(fixtureWorkflowPath('valid'));
@@ -686,6 +885,25 @@ describe('loadWorkflow', function () {
 
         expect(fn () => $this->workflows->loadWorkflow($path))
             ->toThrow(InvalidWorkflowFile::class, 'The workflow file ['.$path.'] is invalid: The sort order field is required. The steps field must be present.');
+    });
+
+    it('rejects a step naming a variable laborforest does not recognize', function () {
+        // the whole of what validating a workflow has to say about its variables: whether a
+        // placeholder resolves is a question about a workspace at a moment, not about the file
+        $path = fixtureWorkflowPath('unknown-variable');
+
+        try {
+            $this->workflows->loadWorkflow($path);
+        } catch (InvalidWorkflowFile $e) {
+            expect($e->problems)->toBe([
+                'Unknown variables: {{ NOPE }}.',
+                'Unknown variables: {{ ALSO_NOPE }}.',
+            ]);
+
+            return;
+        }
+
+        $this->fail('Expected an InvalidWorkflowFile exception.');
     });
 
     it('reports every validation problem joined by a space', function () {

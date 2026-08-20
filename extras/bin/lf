@@ -49,7 +49,9 @@ require_workflow_file() {
         exit 0
     fi
 
-    if [[ ! -f ".laborforest/workflows/${workflow}.yaml" ]]; then
+    # both spellings of the extension are accepted, matching the app; the message names the
+    # `.yaml` form because that is the one the app itself writes
+    if [[ ! -f ".laborforest/workflows/${workflow}.yaml" && ! -f ".laborforest/workflows/${workflow}.yml" ]]; then
         printf 'File not found: .laborforest/workflows/%s.yaml\n' "$workflow" >&2
         exit 1
     fi
