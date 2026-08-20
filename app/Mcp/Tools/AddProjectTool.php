@@ -14,6 +14,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
+use Throwable;
 
 #[Name('add-project')]
 #[Title('Add Project')]
@@ -29,7 +30,7 @@ class AddProjectTool extends Tool
 
         try {
             $project = app(ProjectsService::class)->addProject($path);
-        } catch (\Throwable $th) {
+        } catch (Throwable $th) {
             return Response::error($th->getMessage());
         }
 

@@ -13,6 +13,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
+use Throwable;
 
 #[IsDestructive]
 #[Name('remove-project')]
@@ -31,7 +32,7 @@ class RemoveProjectTool extends Tool
                 $request->boolean('remove_directory'),
                 $request->boolean('remove_worktrees'),
             );
-        } catch (\Throwable $th) {
+        } catch (Throwable $th) {
             return Response::error($th->getMessage());
         }
 

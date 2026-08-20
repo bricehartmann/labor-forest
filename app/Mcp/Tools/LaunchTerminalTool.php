@@ -2,9 +2,8 @@
 
 namespace App\Mcp\Tools;
 
-use App\Data\WorkspaceData;
+use App\Concerns\Mcp\ResolvesWorkspace;
 use App\Services\LaunchService;
-use App\Services\ProjectsService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
 use Illuminate\Support\Str;
@@ -23,27 +22,20 @@ use Throwable;
 #[Description('Launch a terminal for the given workspace path using the preconfigured command.')]
 class LaunchTerminalTool extends Tool
 {
+    use ResolvesWorkspace;
+
     /**
      * Handle the tool request.
      */
     public function handle(Request $request): Response
     {
-        $path = Str::rtrim($request->get('path'), '/');
+        $resolved = $this->resolveWorkspace(Str::rtrim($request->get('path'), '/'));
 
-        $projectService = app(ProjectsService::class);
-
-        /** @var WorkspaceData|null $workspace */
-        $workspace = rescue(fn () => $projectService->loadProjectWorkspace($path));
-
-        if (! $workspace) {
-            return Response::error('Failed to find workspace.');
+        if ($resolved instanceof Response) {
+            return $resolved;
         }
 
-        $project = rescue(fn () => $projectService->loadProjectFromWorkspace($workspace->path));
-
-        if (! $project) {
-            return Response::error('Failed to find workspace project.');
-        }
+        [$project, $workspace] = $resolved;
 
         try {
             app(LaunchService::class)->launchTerminal($project, $workspace);

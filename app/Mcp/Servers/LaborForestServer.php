@@ -7,6 +7,7 @@ use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use App\Mcp\Resources\WorkspacesResource;
 use App\Mcp\Tools\AddProjectTool;
+use App\Mcp\Tools\AddWorkspaceTool;
 use App\Mcp\Tools\FindProjectByPathTool;
 use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
@@ -32,6 +33,7 @@ class LaborForestServer extends Server
         LaunchBrowserTool::class,
         AddProjectTool::class,
         RemoveProjectTool::class,
+        AddWorkspaceTool::class,
     ];
 
     protected array $resources = [

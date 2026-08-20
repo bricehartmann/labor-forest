@@ -15,6 +15,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
+use Throwable;
 
 #[IsReadOnly]
 #[Name('find-project-by-path')]
@@ -29,10 +30,14 @@ class FindProjectByPathTool extends Tool
     {
         $path = Str::rtrim($request->get('path'), '/');
 
-        /** @var ProjectData|null $project */
-        $project = rescue(fn () => app(ProjectsService::class)
-            ->loadProjects()
-            ->firstWhere(fn (ProjectData $data) => $data->path === $path));
+        try {
+            /** @var ProjectData|null $project */
+            $project = app(ProjectsService::class)
+                ->loadProjects()
+                ->firstWhere(fn (ProjectData $data) => $data->path === $path);
+        } catch (Throwable $th) {
+            return Response::error($th->getMessage());
+        }
 
         if (! $project) {
             return Response::error('Failed to find project.');

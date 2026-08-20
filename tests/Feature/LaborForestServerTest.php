@@ -5,17 +5,29 @@ use App\Data\SettingsData;
 use App\Enums\McpUri;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\InvalidSettingsFile;
+use App\Exceptions\ProjectDirectoryNotFound;
+use App\Exceptions\ProjectNotFound;
+use App\Exceptions\WorkspaceNotFound;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
 use App\Mcp\Servers\LaborForestServer;
+use App\Mcp\Tools\AddProjectTool;
+use App\Mcp\Tools\AddWorkspaceTool;
 use App\Mcp\Tools\FindProjectByPathTool;
+use App\Mcp\Tools\LaunchBrowserTool;
+use App\Mcp\Tools\LaunchIdeTool;
+use App\Mcp\Tools\LaunchTerminalTool;
+use App\Mcp\Tools\RemoveProjectTool;
+use App\Services\GitService;
+use App\Services\LaunchService;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Resource;
 use Laravel\Mcp\Server\Tool;
+use Mockery\MockInterface;
 
 it('reports the application version to connecting clients', function () {
     config(['nativephp.version' => '1.2.3']);
@@ -169,7 +181,15 @@ describe('tools', function () {
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
         expect($context->tools()->map(fn (Tool $tool) => $tool->name())->values()->all())
-            ->toBe(['find-project-by-path']);
+            ->toBe([
+                'find-project-by-path',
+                'launch-ide',
+                'launch-terminal',
+                'launch-browser',
+                'add-project',
+                'remove-project',
+                'add-workspace',
+            ]);
     });
 
     it('links to the project resource of a matching path', function () {
@@ -216,9 +236,117 @@ describe('tools', function () {
             ->shouldReceive('loadProjects')->once()->andThrow(new InvalidProjectsFile('.laborforest/projects.yaml', ['broken']));
 
         LaborForestServer::tool(FindProjectByPathTool::class, ['path' => '/tmp/beta'])
-            ->assertHasErrors(['Failed to find project.']);
+            ->assertHasErrors(['The projects file [.laborforest/projects.yaml] is invalid: broken']);
+    });
+
+    it('launches for the workspace at the requested path', function (string $tool, string $launchMethod) {
+        $project = componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo');
+        $workspace = componentWorkspaceData('/tmp/repo-feature');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project, $workspace) {
+            // The trailing slash is trimmed before the workspace is looked up
+            $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo-feature')->andReturn($workspace);
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()->with('/tmp/repo-feature')->andReturn($project);
+        });
+
+        $this->mock(LaunchService::class)
+            ->shouldReceive($launchMethod)->once()->with($project, $workspace);
+
+        LaborForestServer::tool($tool, ['path' => '/tmp/repo-feature/'])
+            ->assertOk()
+            ->assertSee('success');
+    })->with('launch tools');
+
+    it('reports a workspace path that is not a workspace', function (string $tool) {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjectWorkspace')->once()
+            ->andThrow(new WorkspaceNotFound('/tmp/nope'));
+
+        LaborForestServer::tool($tool, ['path' => '/tmp/nope'])
+            ->assertHasErrors(["Workspace at path '/tmp/nope' not found."]);
+    })->with('launch tools');
+
+    it('reports a workspace whose project is not registered', function (string $tool) {
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjectWorkspace')->once()->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()->andReturn(null);
+        });
+
+        LaborForestServer::tool($tool, ['path' => '/tmp/repo-feature'])
+            ->assertHasErrors(['Failed to find workspace project.']);
+    })->with('launch tools');
+
+    it('reports a launch command that fails', function (string $tool, string $launchMethod) {
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjectWorkspace')->once()->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()
+                ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
+        });
+
+        $this->mock(LaunchService::class)
+            ->shouldReceive($launchMethod)->once()
+            ->andThrow(new RuntimeException('launch failed'));
+
+        LaborForestServer::tool($tool, ['path' => '/tmp/repo-feature'])
+            ->assertHasErrors(['launch failed']);
+    })->with('launch tools');
+
+    it('links a new workspace to the project owning it', function () {
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('addProjectWorkspace')->once()
+                ->with($project, 'feature', null)
+                ->andReturn(componentWorkspaceData('/tmp/beta-feature'));
+        });
+
+        $this->mock(GitService::class)
+            ->shouldReceive('doesBranchExist')->once()->with('/tmp/beta', 'feature')->andReturn(true);
+
+        LaborForestServer::tool(AddWorkspaceTool::class, ['path' => '/tmp/beta', 'branch' => 'feature'])
+            ->assertOk()
+            ->assertSee('success');
+    });
+
+    it('reports a uuid that matches no project instead of failing on it', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProject')->once()
+            ->andThrow(new ProjectNotFound('33333333-3333-3333-3333-333333333333'));
+
+        LaborForestServer::tool(AddWorkspaceTool::class, [
+            'uuid' => '33333333-3333-3333-3333-333333333333',
+            'branch' => 'feature',
+        ])->assertHasErrors(["Project with UUID '33333333-3333-3333-3333-333333333333' not found."]);
+    });
+
+    it('reports a project directory it cannot add', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('addProject')->once()->with('/tmp/nope')
+            ->andThrow(new ProjectDirectoryNotFound('/tmp/nope'));
+
+        LaborForestServer::tool(AddProjectTool::class, ['path' => '/tmp/nope/'])
+            ->assertHasErrors([(new ProjectDirectoryNotFound('/tmp/nope'))->getMessage()]);
+    });
+
+    it('reports a project it cannot remove', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('removeProject')->once()
+            ->andThrow(new ProjectNotFound('33333333-3333-3333-3333-333333333333'));
+
+        LaborForestServer::tool(RemoveProjectTool::class, [
+            'uuid' => '33333333-3333-3333-3333-333333333333',
+            'remove_directory' => false,
+            'remove_worktrees' => false,
+        ])->assertHasErrors(["Project with UUID '33333333-3333-3333-3333-333333333333' not found."]);
     });
 });
+
+dataset('launch tools', [
+    'ide' => [LaunchIdeTool::class, 'launchIde'],
+    'terminal' => [LaunchTerminalTool::class, 'launchTerminal'],
+    'browser' => [LaunchBrowserTool::class, 'launchBrowser'],
+]);
 
 /**
  * The JSON exactly as App\Concerns\Mcp\RespondsWithJson encodes it.
