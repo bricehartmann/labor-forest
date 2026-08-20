@@ -103,6 +103,8 @@ class WorkflowService
     }
 
     /**
+     * @param  ?array<int, string>  $stepHashes  the steps to run, or null to run every step of the workflow
+     *
      * @throws InvalidWorkflowFile
      * @throws WorkflowNotRunnable
      * @throws WorkspaceNotFound
@@ -134,7 +136,7 @@ class WorkflowService
             projectUuid: $projectUuid,
             workspacePath: $workspacePath,
             workflowName: $workflowName,
-            stepHashes: $stepHashes,
+            stepHashes: $stepHashes ?? $workflowData->stepHashes(),
             parent: $parentLogId,
             timeoutSeconds: $timeoutSeconds,
             // read before the pending write above, so a workflow with no `ending_status` can put the

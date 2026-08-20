@@ -169,9 +169,6 @@ describe('add-project', function () {
 
 describe('run-workflow', function () {
     it('dispatches the workflow and returns its log', function () {
-        $steps = [componentStepData(), componentStepData(name: 'Migrate', run: 'php artisan migrate')];
-        $expectedHashes = [$steps[0]->hash('0'), $steps[1]->hash('1')];
-
         cliToolsWritePendingWorkflow($this->workspacePath, 'up');
         cliToolsMockProjectsService($this->workspacePath, componentProjectData($this->uuid, '/tmp/repo'));
 
@@ -181,15 +178,11 @@ describe('run-workflow', function () {
                 ->andReturn(new SettingsData(workflow_step_timeout_seconds: 45));
         });
 
-        $this->mock(WorkflowService::class, function (MockInterface $mock) use ($steps, $expectedHashes) {
-            $mock->shouldReceive('loadSteps')
-                ->once()
-                ->with($this->workspacePath, 'up')
-                ->andReturn(collect($steps));
-
+        // null step selection: a run started from the CLI runs the whole workflow
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
             $mock->shouldReceive('dispatchWorkflow')
                 ->once()
-                ->with($this->uuid, $this->workspacePath, 'up', $expectedHashes, null, 45)
+                ->with($this->uuid, $this->workspacePath, 'up', null, null, 45)
                 ->andReturn('20240101T000000Z_repo-feature_up');
         });
 
@@ -209,7 +202,6 @@ describe('run-workflow', function () {
         });
 
         $this->mock(WorkflowService::class, function (MockInterface $mock) {
-            $mock->shouldReceive('loadSteps')->andReturn(collect([componentStepData()]));
             $mock->shouldReceive('dispatchWorkflow')->andReturn('20240101T000000Z_repo-feature_up');
         });
 
@@ -289,10 +281,9 @@ describe('run-workflow', function () {
         });
 
         $this->mock(WorkflowService::class, function (MockInterface $mock) {
-            $mock->shouldReceive('loadSteps')
+            $mock->shouldReceive('dispatchWorkflow')
                 ->once()
                 ->andThrow(InvalidWorkflowFile::withProblems($this->workflowPath, ['The steps field is required.']));
-            $mock->shouldNotReceive('dispatchWorkflow');
         });
 
         expect(cliToolsRun())
@@ -308,7 +299,6 @@ describe('run-workflow', function () {
         });
 
         $this->mock(WorkflowService::class, function (MockInterface $mock) {
-            $mock->shouldReceive('loadSteps')->andReturn(collect([componentStepData()]));
             $mock->shouldReceive('dispatchWorkflow')
                 ->once()
                 ->andThrow(new WorkflowNotRunnable('up', WorkspaceStatus::READY, WorkspaceStatus::SUSPENDED));
@@ -327,7 +317,6 @@ describe('run-workflow', function () {
         });
 
         $this->mock(WorkflowService::class, function (MockInterface $mock) {
-            $mock->shouldReceive('loadSteps')->andReturn(collect([componentStepData()]));
             $mock->shouldReceive('dispatchWorkflow')
                 ->once()
                 ->andThrow(new WorkspaceNotFound($this->workspacePath));
@@ -350,7 +339,6 @@ describe('validate-workflow', function () {
                 ->with($this->workflowPath)
                 ->andReturn(componentWorkflowData([componentStepData()]));
 
-            $mock->shouldNotReceive('loadSteps');
             $mock->shouldNotReceive('dispatchWorkflow');
         });
 

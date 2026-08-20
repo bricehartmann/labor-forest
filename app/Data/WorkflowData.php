@@ -55,6 +55,19 @@ class WorkflowData extends Data implements McpResource
         ];
     }
 
+    /**
+     * The hash of every step, in order — the selection meaning "run the whole workflow".
+     *
+     * @return array<int, string>
+     */
+    public function stepHashes(): array
+    {
+        return $this->steps
+            ->values()
+            ->map(fn (WorkflowStepData $step, int $index) => $step->hash((string) $index))
+            ->all();
+    }
+
     public function toMcpResource(): array
     {
         return [

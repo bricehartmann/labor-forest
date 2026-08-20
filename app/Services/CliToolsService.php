@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Concerns\Services\ManagesFiles;
 use App\Data\PendingCliCommandData;
-use App\Data\WorkflowStepData;
 use App\Enums\CliCommand;
 use App\Enums\Directory;
 use App\Enums\Disk;
@@ -134,7 +133,7 @@ class CliToolsService
             projectUuid: $projectData->uuid,
             workspacePath: $workspaceData->path,
             workflowName: $workflow,
-            stepHashes: $this->allStepHashes($workspaceData->path, $workflow),
+            stepHashes: null,
             parentLogId: null,
             timeoutSeconds: $settings->workflow_step_timeout_seconds,
         );
@@ -214,21 +213,6 @@ class CliToolsService
     private function dashboardUrl(string $error): string
     {
         return Dashboard::getUrl([QueryParameter::ERROR->value => $error]);
-    }
-
-    /**
-     * The hashes of every step of a workflow, so a run started from the CLI runs the whole thing.
-     *
-     * @return array<int, string>
-     *
-     * @throws InvalidWorkflowFile
-     */
-    private function allStepHashes(string $workspacePath, string $workflowName): array
-    {
-        return app(WorkflowService::class)
-            ->loadSteps($workspacePath, $workflowName)
-            ->map(fn (WorkflowStepData $step, int $index) => $step->hash((string) $index))
-            ->all();
     }
 
     /**

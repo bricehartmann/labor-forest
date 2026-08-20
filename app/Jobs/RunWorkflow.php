@@ -527,17 +527,16 @@ class RunWorkflow implements ShouldQueue
         ]);
 
         try {
-            $childSteps = $workflowService->loadSteps($this->workspacePath, $childWorkflowName);
+            $childWorkflowData = $workflowService->loadWorkflow(
+                $workflowService->workflowPath($this->workspacePath, $childWorkflowName),
+            );
 
             $child = new self(
                 timestamp: $workflowService->availableLogTimestamp($workspaceData, $childWorkflowName, now()->timestamp),
                 projectUuid: $this->projectUuid,
                 workspacePath: $this->workspacePath,
                 workflowName: $childWorkflowName,
-                stepHashes: $childSteps
-                    ->values()
-                    ->map(fn (WorkflowStepData $childStep, int $index) => $childStep->hash((string) $index))
-                    ->all(),
+                stepHashes: $childWorkflowData->stepHashes(),
                 parent: $this->workflowRunLogData->id,
                 timeoutSeconds: $this->timeoutSeconds,
                 ancestorWorkflowNames: $chain,

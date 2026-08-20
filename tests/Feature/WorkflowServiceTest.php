@@ -392,6 +392,17 @@ describe('dispatchWorkflow', function () {
             ->and($job->statusBeforeRun)->toBe(WorkspaceStatus::SUSPENDED);
     });
 
+    it('runs every step of the workflow when no step selection is given', function () {
+        $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'up', null, null, 600);
+
+        $everyStepHash = $this->workflows->loadSteps($this->fixturePath, 'up')
+            ->map(fn (WorkflowStepData $step, int $index) => $step->hash((string) $index))
+            ->all();
+
+        expect($everyStepHash)->toHaveCount(2)
+            ->and(Queue::pushed(RunWorkflow::class)->sole()->stepHashes)->toBe($everyStepHash);
+    });
+
     it('hands the job the status the run was dispatched from, not the pending one it writes', function () {
         $this->workflows->dispatchWorkflow('project-uuid', $this->fixturePath, 'up', [], null, 600);
 

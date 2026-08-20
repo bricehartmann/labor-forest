@@ -3,11 +3,13 @@
 use App\Data\ProjectData;
 use App\Data\SettingsData;
 use App\Enums\McpUri;
+use App\Enums\WorkspaceStatus;
 use App\Events\GlobalRefresh;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\InvalidSettingsFile;
 use App\Exceptions\ProjectDirectoryNotFound;
 use App\Exceptions\ProjectNotFound;
+use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
@@ -21,11 +23,14 @@ use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
 use App\Mcp\Tools\LaunchTerminalTool;
 use App\Mcp\Tools\RemoveProjectTool;
+use App\Mcp\Tools\RunWorkflowTool;
 use App\Services\GitService;
 use App\Services\LaunchService;
 use App\Services\ProjectsService;
 use App\Services\SettingsService;
+use App\Services\WorkflowService;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\File;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Resource;
@@ -71,9 +76,14 @@ describe('resources', function () {
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
         expect($context->resources()->map(fn (Resource $resource) => $resource->name())->values()->all())
-            ->toBe(['settings', 'projects'])
+            ->toBe(['settings', 'projects', 'template-variables'])
             ->and($context->resources()->map(fn (Resource $resource) => $resource->uri())->values()->all())
-            ->toBe(['laborforest://settings', 'laborforest://projects'])
+            ->toBe([
+                'laborforest://settings',
+                'laborforest://projects',
+                // TemplateVariablesResource declares no uri, so the package derives this one
+                'file://resources/template-variables-resource',
+            ])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => $resource->name())->values()->all())
             ->toBe(['project', 'workspaces'])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => (string) $resource->uriTemplate())->values()->all())
@@ -193,6 +203,8 @@ describe('tools', function () {
                 'remove-project',
                 'add-workspace',
                 'add-workspace-example-workflows',
+                'dispatch-workflow',
+                'update-settings',
             ]);
     });
 
@@ -413,6 +425,80 @@ describe('tools', function () {
             ->assertHasErrors([(new ProjectDirectoryNotFound('/tmp/nope'))->getMessage()]);
     });
 
+    it('dispatches every step of the named workflow for the workspace at the path', function () {
+        $project = componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo');
+        $workflowPath = '/tmp/repo-feature/.laborforest/workflows/up.yaml';
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            // The trailing slash is trimmed before the workspace is looked up
+            $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo-feature')
+                ->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()->with('/tmp/repo-feature')->andReturn($project);
+        });
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()
+            ->andReturn(new SettingsData(workflow_step_timeout_seconds: 45));
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) use ($workflowPath) {
+            $mock->shouldReceive('workflowPath')->once()->with('/tmp/repo-feature', 'up')->andReturn($workflowPath);
+
+            // null step selection: the tool runs the whole workflow, as `lf run` does
+            $mock->shouldReceive('dispatchWorkflow')->once()
+                ->with('11111111-1111-1111-1111-111111111111', '/tmp/repo-feature', 'up', null, null, 45)
+                ->andReturn('20240101T000000Z_repo-feature_up');
+        });
+
+        mcpWorkflowFileExists($workflowPath);
+
+        LaborForestServer::tool(RunWorkflowTool::class, ['path' => '/tmp/repo-feature/', 'workflow' => 'up'])
+            ->assertOk()
+            ->assertSee('20240101T000000Z_repo-feature_up');
+    });
+
+    it('reports a workflow name matching no file before reading it', function () {
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjectWorkspace')->once()->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()
+                ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
+        });
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('workflowPath')->once()->with('/tmp/repo-feature', 'down')
+                ->andReturn('/tmp/repo-feature/.laborforest/workflows/down.yaml');
+            $mock->shouldNotReceive('dispatchWorkflow');
+        });
+
+        mcpWorkflowFileExists('/tmp/repo-feature/.laborforest/workflows/up.yaml');
+
+        LaborForestServer::tool(RunWorkflowTool::class, ['path' => '/tmp/repo-feature', 'workflow' => 'down'])
+            ->assertHasErrors(["Workflow 'down' does not exist."]);
+    });
+
+    it('reports a workflow the workspace is not in a position to run', function () {
+        $workflowPath = '/tmp/repo-feature/.laborforest/workflows/up.yaml';
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjectWorkspace')->once()->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()
+                ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
+        });
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()->andReturn(new SettingsData);
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) use ($workflowPath) {
+            $mock->shouldReceive('workflowPath')->once()->andReturn($workflowPath);
+            $mock->shouldReceive('dispatchWorkflow')->once()
+                ->andThrow(new WorkflowNotRunnable('up', WorkspaceStatus::READY, WorkspaceStatus::SUSPENDED));
+        });
+
+        mcpWorkflowFileExists($workflowPath);
+
+        LaborForestServer::tool(RunWorkflowTool::class, ['path' => '/tmp/repo-feature', 'workflow' => 'up'])
+            ->assertHasErrors(['Workflow [up] requires the workspace to be suspended, but it is ready.']);
+    });
+
     it('reports a project it cannot remove', function () {
         $this->mock(ProjectsService::class)
             ->shouldReceive('removeProject')->once()
@@ -453,4 +539,19 @@ function mcpProjectListing(ProjectData $project): array
         'uri' => McpUri::PROJECT->build(['uuid' => $project->uuid]),
         ...$project->toMcpResource(),
     ];
+}
+
+/**
+ * Answer File::isFile() for the given workflow path alone, so nothing is written to disk.
+ *
+ * Paths outside the fixture tree still resolve, because Laravel's own translation files are
+ * loaded when a validation message is rendered.
+ */
+function mcpWorkflowFileExists(string $workflowPath): void
+{
+    File::partialMock()
+        ->shouldReceive('isFile')
+        ->andReturnUsing(fn (string $path) => str_starts_with($path, '/tmp/')
+            ? $path === $workflowPath
+            : is_file($path));
 }
