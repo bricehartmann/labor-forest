@@ -2,7 +2,7 @@
 
 ## Overview
 
-LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). An agent that connects to it can list your Projects and Workspaces, create and remove git worktrees, seed workflows into a Workspace, run those workflows, delete the run logs those workflows leave behind, open your IDE, terminal or browser against a Workspace, and change both the global settings and a single Project's launch command overrides.
+LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). An agent that connects to it can list your Projects and Workspaces, create and remove git worktrees, seed workflows into a Workspace, check those workflow files over without running them, run them, delete the run logs they leave behind, open your IDE, terminal or browser against a Workspace, and change both the global settings and a single Project's launch command overrides.
 
 The server is local. It listens on `127.0.0.1` only, it runs as a child process of the app for as long as the app is open, and it is enabled by default on port `9189`. The toggle, the port, the `Add to Claude Code` command and the `Test connection` button all live on the [Settings](settings.md) screen.
 
@@ -66,6 +66,7 @@ The `projects` list is ordered by when each Project was last opened. It answers 
 | `remove-project`                  | destructive | `uuid`, `remove_directory`, `remove_worktrees`                          | `success`                      |
 | `add-workspace`                   |             | `path` or `uuid`, `branch`, `base_branch`                               | `success`                      |
 | `add-workspace-example-workflows` |             | `path` to a Workspace, `example`                                        | `success`                      |
+| `validate-workflow`               | read-only   | `path` to a Workspace, `workflow`                                       | The workflow file it read      |
 | `run-workflow`                    |             | `path` to a Workspace, `workflow`                                       | The workflow run log ID        |
 | `update-settings`                 | destructive | `dark_mode`, `workflow_step_timeout_seconds`, the three launch commands | `success`                      |
 | `update-project-launch-commands`  | destructive | `path` or `uuid`, the three launch commands                             | `success`                      |
@@ -96,6 +97,16 @@ The run is queued and the tool returns as soon as it is dispatched, with the run
 A workflow declaring `require_status` is gated exactly as it is in the app. Asking for one the Workspace is not in a position to run is refused with a message naming both statuses, for example `Workflow [up] requires the workspace to be suspended, but it is ready.` See [Workflows](workflows.md) for the statuses and the gate.
 
 Steps run with the workflow step timeout from the settings file, and with LaborForest's own environment stripped out, so a workflow does not inherit the app's configuration.
+
+### Validating workflows
+
+`validate-workflow` answers the question `run-workflow` cannot be asked without consequences: is this workflow file usable? It takes the same Workspace path and workflow name, reads the file, and returns without starting anything.
+
+It reports on the file alone. A name matching no file is `Workflow 'up' does not exist.`, the same message `run-workflow` gives. A file that does not parse, or that parses into something the workflow rules reject, comes back as the whole list of problems at once — `The workflow file [...] is invalid: The steps field is required. The selected ending status is invalid.` — rather than one problem per call. Those rules cover the shape of every step and reject a mustache tag naming a variable LaborForest does not recognize, wherever it appears: `run`, `if`, `unless`, an `env` value or an `update_env` value.
+
+What it deliberately does not do is inspect the Workspace. Whether an `ENV_` passthrough resolves against that Workspace's `.env` right now, and whether the Workspace holds the status a workflow declaring `require_status` needs, are facts about this moment rather than about the file — so a workflow that validates does so identically in every Workspace, and only `run-workflow` enforces the gate.
+
+A workflow that passes comes back as what was read: the workflow name, the file path, its `require_status` and `ending_status`, and the name and type of each step in order.
 
 ### Purging run logs
 

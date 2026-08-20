@@ -19,6 +19,7 @@ use App\Mcp\Tools\RemoveProjectTool;
 use App\Mcp\Tools\RunWorkflowTool;
 use App\Mcp\Tools\UpdateProjectLaunchCommandsTool;
 use App\Mcp\Tools\UpdateSettingsTool;
+use App\Mcp\Tools\ValidateWorkflowTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -41,6 +42,7 @@ class LaborForestServer extends Server
         RemoveProjectTool::class,
         AddWorkspaceTool::class,
         AddWorkspaceExampleWorkflowsTool::class,
+        ValidateWorkflowTool::class,
         RunWorkflowTool::class,
         UpdateSettingsTool::class,
         UpdateProjectLaunchCommandsTool::class,

@@ -758,6 +758,34 @@ describe('purgeWorkflowLogs', function () {
     });
 });
 
+describe('stepHashes', function () {
+    it('hashes every step by the position it holds in the workflow', function () {
+        $steps = [componentStepData(), componentStepData(name: 'Migrate', run: 'php artisan migrate')];
+
+        expect(componentWorkflowData($steps)->stepHashes())
+            ->toBe([$steps[0]->hash('0'), $steps[1]->hash('1')]);
+    });
+
+    it('hashes a step by its position rather than its key', function () {
+        // the steps of a workflow read back from yaml are re-indexed before they are hashed, so a
+        // gap in the keys cannot shift a step's hash away from the one the run log carries
+        $step = componentStepData();
+
+        $workflow = new WorkflowData(
+            require_status: null,
+            ending_status: WorkspaceStatus::READY,
+            sort_order: 0,
+            steps: collect([3 => $step]),
+        );
+
+        expect($workflow->stepHashes())->toBe([$step->hash('0')]);
+    });
+
+    it('hashes nothing for a workflow with no steps', function () {
+        expect(componentWorkflowData([])->stepHashes())->toBe([]);
+    });
+});
+
 describe('loadWorkflow', function () {
     it('hydrates a workflow from its file', function () {
         $workflow = $this->workflows->loadWorkflow(fixtureWorkflowPath('valid'));
@@ -800,6 +828,25 @@ describe('loadWorkflow', function () {
 
         expect(fn () => $this->workflows->loadWorkflow($path))
             ->toThrow(InvalidWorkflowFile::class, 'The workflow file ['.$path.'] is invalid: The sort order field is required. The steps field must be present.');
+    });
+
+    it('rejects a step naming a variable laborforest does not recognize', function () {
+        // the whole of what validating a workflow has to say about its variables: whether a
+        // placeholder resolves is a question about a workspace at a moment, not about the file
+        $path = fixtureWorkflowPath('unknown-variable');
+
+        try {
+            $this->workflows->loadWorkflow($path);
+        } catch (InvalidWorkflowFile $e) {
+            expect($e->problems)->toBe([
+                'Unknown variables: {{ NOPE }}.',
+                'Unknown variables: {{ ALSO_NOPE }}.',
+            ]);
+
+            return;
+        }
+
+        $this->fail('Expected an InvalidWorkflowFile exception.');
     });
 
     it('reports every validation problem joined by a space', function () {

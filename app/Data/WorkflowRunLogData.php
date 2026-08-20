@@ -2,7 +2,6 @@
 
 namespace App\Data;
 
-use App\Contracts\McpResource;
 use App\Enums\WorkflowStatus;
 use App\Enums\YamlResourceType;
 use Illuminate\Support\Collection;
@@ -13,7 +12,7 @@ use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Support\Transformation\TransformationContext;
 use Spatie\LaravelData\Support\Transformation\TransformationContextFactory;
 
-class WorkflowRunLogData extends Data implements McpResource
+class WorkflowRunLogData extends Data
 {
     public function __construct(
         public string $id,
@@ -50,13 +49,5 @@ class WorkflowRunLogData extends Data implements McpResource
         }
 
         return $step;
-    }
-
-    public function toMcpResource(): array
-    {
-        return [
-            ...$this->toArray(),
-            'steps' => $this->steps->map(fn (WorkflowRunLogStepData $step) => $step->toMcpResource())->values()->all(),
-        ];
     }
 }

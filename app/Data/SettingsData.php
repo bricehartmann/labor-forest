@@ -51,7 +51,8 @@ class SettingsData extends Data implements McpResource
             'mcp_port' => [
                 'required',
                 'integer',
-                'min:0',
+                'min:1024',
+                'max:49151',
             ],
             'command_launch_ide' => [
                 'nullable',

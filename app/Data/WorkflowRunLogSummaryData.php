@@ -2,7 +2,6 @@
 
 namespace App\Data;
 
-use App\Contracts\McpResource;
 use App\Enums\WorkflowStatus;
 use App\Enums\YamlResourceType;
 use Spatie\LaravelData\Attributes\WithCast;
@@ -18,7 +17,7 @@ use Spatie\LaravelData\Support\Transformation\TransformationContextFactory;
  * megabytes per run, so a list of runs is hydrated from this instead. Unknown keys are ignored
  * by Data::from(), which lets a whole parsed log hydrate this just as well as a stripped header.
  */
-class WorkflowRunLogSummaryData extends Data implements McpResource
+class WorkflowRunLogSummaryData extends Data
 {
     public function __construct(
         public string $id,
@@ -37,10 +36,5 @@ class WorkflowRunLogSummaryData extends Data implements McpResource
             'resource_type' => YamlResourceType::WORKFLOW_RUN_LOG->value,
             ...parent::transform($transformationContext),
         ];
-    }
-
-    public function toMcpResource(): array
-    {
-        return $this->toArray();
     }
 }

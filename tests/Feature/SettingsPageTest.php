@@ -2,11 +2,13 @@
 
 use App\Data\SettingsData;
 use App\Enums\McpEndpoint;
+use App\Enums\McpServerStatus;
 use App\Exceptions\InvalidSettingsFile;
 use App\Filament\Pages\Settings;
 use App\Services\McpService;
 use App\Services\SettingsService;
 use Filament\Actions\Testing\TestAction;
+use Filament\Notifications\Notification;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -202,6 +204,73 @@ describe('mcp server', function () {
             ->assertNotified('Settings saved');
     });
 
+    it('leaves the server alone when mcp is saved while it stays switched off', function () {
+        ($this->settingsAre)(mcpEnabled: false);
+
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('startMcpServer')->never();
+            $mock->shouldReceive('restartMcpServer')->never();
+            $mock->shouldReceive('stopMcpServer')->never();
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => false, 'workflow_step_timeout_seconds' => 90])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('Settings saved');
+    });
+
+    it('keeps the port a disabled field never submits', function () {
+        // Filament does not dehydrate a disabled field, so `mcp_port` is absent from the saved form
+        // state whenever mcp is off; the stored value survives through the merge in save()
+        $this->mock(SettingsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSettings')->andReturn(settingsPageSettingsData(mcpEnabled: true, mcpPort: 9876));
+            $mock->shouldReceive('saveSettings')->once()->withArgs(
+                fn (SettingsData $settings) => $settings->mcp_enabled === false && $settings->mcp_port === 9876,
+            );
+        });
+
+        $this->mock(McpService::class)->shouldReceive('stopMcpServer')->once();
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => false])
+            ->call('save')
+            ->assertHasNoFormErrors()
+            ->assertNotified('Settings saved');
+    });
+
+    it('starts the server when the settings it is replacing could not be read', function () {
+        // the previous settings are rescued to null, so nothing is known to be running and the save
+        // is treated as switching mcp on
+        $this->mock(SettingsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadSettings')
+                ->andThrow(new InvalidSettingsFile('.laborforest/settings.yaml', ['broken']));
+        });
+
+        $this->mock(McpService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('startMcpServer')->once();
+            $mock->shouldReceive('restartMcpServer')->never();
+            $mock->shouldReceive('stopMcpServer')->never();
+        });
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => true, 'mcp_port' => 9189])
+            ->call('save')
+            ->assertHasNoFormErrors();
+    });
+
+    it('says nothing beyond the saved confirmation when the server operation succeeds', function () {
+        ($this->settingsAre)(mcpEnabled: false);
+
+        $this->mock(McpService::class)->shouldReceive('startMcpServer')->once();
+
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => true, 'mcp_port' => 9189])
+            ->call('save')
+            ->assertNotified('Settings saved')
+            ->assertNotNotified('The MCP server could not be updated.');
+    });
+
     it('reports a failed process operation, having still written the settings', function () {
         $this->mock(SettingsService::class, function (MockInterface $mock) {
             $mock->shouldReceive('loadSettings')->andReturn(settingsPageSettingsData(mcpEnabled: true));
@@ -306,6 +375,37 @@ describe('test mcp connection', function () {
         Http::assertSent(fn (Request $request) => $request->url() === McpEndpoint::LABORFOREST->url(9876));
     });
 
+    it('reports an endpoint that answers with an error status', function () {
+        Http::fake([$this->url => Http::response('', 500)]);
+
+        Livewire::test(Settings::class)
+            ->callAction($this->action)
+            ->assertNotified('The endpoint answered with an error');
+    });
+
+    it('refuses to probe the port the app window itself is served on', function () {
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_port' => request()->getPort()])
+            ->callAction($this->action)
+            ->assertNotified('That port belongs to the app window');
+
+        Http::assertNothingSent();
+    });
+
+    it('describes the server it reached, with the icon of a healthy check', function () {
+        Http::fake([$this->url => Http::response(mcpInitializeReplyPayload(version: '1.2.3', protocol: '2025-11-25'))]);
+
+        Livewire::test(Settings::class)
+            ->callAction($this->action)
+            ->assertNotified(
+                Notification::make()
+                    ->success()
+                    ->icon(McpServerStatus::HEALTHY->icon())
+                    ->title('The MCP server answered')
+                    ->body("LaborForest 1.2.3 answered at {$this->url} over MCP 2025-11-25."),
+            );
+    });
+
     it('falls back to the generic failure for an error the check does not name', function () {
         $this->mock(McpService::class, function (MockInterface $mock) {
             $mock->shouldReceive('checkMcpServer')->once()->andThrow(new RuntimeException('Boom'));
@@ -336,6 +436,19 @@ describe('validation', function () {
         'not a number' => ['soon', 'numeric'],
         'below the minimum' => [-1, 'min'],
         'above the maximum' => [3601, 'max'],
+    ]);
+
+    it('rejects an mcp port that breaks its rule', function (mixed $port, string $rule) {
+        Livewire::test(Settings::class)
+            ->fillForm(['mcp_enabled' => true, 'mcp_port' => $port])
+            ->call('save')
+            ->assertHasFormErrors(['mcp_port' => $rule])
+            ->assertNotNotified('Settings saved');
+    })->with([
+        'missing' => [null, 'required'],
+        'not a number' => ['nine thousand', 'numeric'],
+        'below the first unprivileged port' => [1023, 'min'],
+        'above the last registered port' => [49152, 'max'],
     ]);
 
     it('rejects a launch command that uses an unknown variable', function () {

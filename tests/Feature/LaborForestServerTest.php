@@ -4,18 +4,25 @@ use App\Data\ProjectData;
 use App\Data\SettingsData;
 use App\Data\WorkspaceData;
 use App\Enums\McpUri;
+use App\Enums\Variable;
+use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Events\GlobalRefresh;
+use App\Exceptions\GitOperationFailed;
 use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\InvalidSettingsFile;
+use App\Exceptions\InvalidWorkflowFile;
 use App\Exceptions\ProjectDirectoryNotFound;
 use App\Exceptions\ProjectNotFound;
 use App\Exceptions\WorkflowLogsNotDeleted;
 use App\Exceptions\WorkflowNotRunnable;
+use App\Exceptions\WorkspaceDirectoryExists;
 use App\Exceptions\WorkspaceNotFound;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Resources\ProjectsResource;
 use App\Mcp\Resources\SettingsResource;
+use App\Mcp\Resources\TemplateVariablesResource;
+use App\Mcp\Resources\WorkspacesResource;
 use App\Mcp\Servers\LaborForestServer;
 use App\Mcp\Tools\AddProjectTool;
 use App\Mcp\Tools\AddWorkspaceExampleWorkflowsTool;
@@ -29,6 +36,7 @@ use App\Mcp\Tools\RemoveProjectTool;
 use App\Mcp\Tools\RunWorkflowTool;
 use App\Mcp\Tools\UpdateProjectLaunchCommandsTool;
 use App\Mcp\Tools\UpdateSettingsTool;
+use App\Mcp\Tools\ValidateWorkflowTool;
 use App\Services\GitService;
 use App\Services\LaunchService;
 use App\Services\ProjectsService;
@@ -191,6 +199,122 @@ describe('resources', function () {
         LaborForestServer::resource(ProjectResource::class, ['uuid' => '33333333-3333-3333-3333-333333333333'])
             ->assertHasErrors(['Failed to load project.']);
     });
+
+    it('carries the derived names a project resource is read for', function () {
+        // spelled out rather than rebuilt from toMcpResource(), which is the method under test: the
+        // assertions above compare it against itself and would survive the keys being dropped
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjects')->once()->andReturn(collect([
+                componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/repos/My Repo'),
+            ]));
+
+        LaborForestServer::resource(ProjectResource::class, ['uuid' => '22222222-2222-2222-2222-222222222222'])
+            ->assertOk()
+            ->assertSee('"dir_name":"My Repo"')
+            ->assertSee('"parent_dir":"/tmp/repos"')
+            ->assertSee('"slug_kebab":"my-repo"')
+            ->assertSee('"slug_snake":"my_repo"');
+    });
+
+    it('reads the workspaces of a project as a json array', function () {
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/repo');
+        $workspaces = collect([
+            componentWorkspaceData('/tmp/repo', isPrimary: true, branch: 'main'),
+            componentWorkspaceData('/tmp/repo-feature'),
+        ]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project, $workspaces) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('loadProjectWorkspaces')->once()->with('/tmp/repo')->andReturn($workspaces);
+        });
+
+        LaborForestServer::resource(WorkspacesResource::class, ['uuid' => $project->uuid])
+            ->assertOk()
+            ->assertSee(mcpJson($workspaces->map(fn (WorkspaceData $data) => $data->toMcpResource())->all()));
+    });
+
+    it('carries the derived names a workspace resource is read for', function () {
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/repo');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('loadProjectWorkspaces')->once()
+                ->andReturn(collect([componentWorkspaceData('/tmp/repos/My Repo-feature')]));
+        });
+
+        LaborForestServer::resource(WorkspacesResource::class, ['uuid' => $project->uuid])
+            ->assertOk()
+            ->assertSee('"dir_name":"My Repo-feature"')
+            ->assertSee('"parent_dir":"/tmp/repos"')
+            ->assertSee('"slug_kebab":"my-repo-feature"')
+            ->assertSee('"slug_snake":"my_repo_feature"');
+    });
+
+    it('addresses the workspaces of a project by a uri the workspaces template reads', function () {
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/repo');
+
+        $variables = (new WorkspacesResource)->uriTemplate()->match(
+            McpUri::WORKSPACES->build(['uuid' => $project->uuid]),
+        );
+
+        expect($variables)->toBe(['uuid' => $project->uuid]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('loadProjectWorkspaces')->once()->andReturn(collect());
+        });
+
+        LaborForestServer::resource(WorkspacesResource::class, $variables)->assertOk();
+    });
+
+    it('reads an empty workspace list for a project with no worktrees', function () {
+        // loadProjectWorkspaces() rescues a git failure to an empty collection of its own, so this
+        // is what a project whose worktrees cannot be listed answers with as well
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/repo');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('loadProjectWorkspaces')->once()->andReturn(collect());
+        });
+
+        LaborForestServer::resource(WorkspacesResource::class, ['uuid' => $project->uuid])
+            ->assertOk()
+            ->assertSee('[]');
+    });
+
+    it('reports a uuid whose workspaces cannot be read because the project is unknown', function () {
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect());
+            $mock->shouldReceive('loadProjectWorkspaces')->never();
+        });
+
+        LaborForestServer::resource(WorkspacesResource::class, ['uuid' => '33333333-3333-3333-3333-333333333333'])
+            ->assertHasErrors(['Failed to load project.']);
+    });
+
+    it('reports a projects file it cannot read the workspaces of a project from', function () {
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjects')->once()
+                ->andThrow(new InvalidProjectsFile('.laborforest/projects.yaml', ['broken']));
+            $mock->shouldReceive('loadProjectWorkspaces')->never();
+        });
+
+        LaborForestServer::resource(WorkspacesResource::class, ['uuid' => '22222222-2222-2222-2222-222222222222'])
+            ->assertHasErrors(['Failed to load project.']);
+    });
+
+    it('reads every template variable with the example it is documented by', function () {
+        $expected = collect(Variable::cases())
+            ->map(fn (Variable $variable) => ['variable' => $variable->value, 'example' => $variable->example()])
+            ->all();
+
+        LaborForestServer::resource(TemplateVariablesResource::class)
+            ->assertOk()
+            ->assertSee(mcpJson($expected))
+            // the enumerated variables alone: the dynamic ENV_ prefix is deliberately not listed
+            ->assertSee('"variable":"WORKSPACE_DIR"')
+            ->assertDontSee('ENV_');
+    });
 });
 
 describe('tools', function () {
@@ -207,6 +331,7 @@ describe('tools', function () {
                 'remove-project',
                 'add-workspace',
                 'add-workspace-example-workflows',
+                'validate-workflow',
                 'run-workflow',
                 'update-settings',
                 'update-project-launch-commands',
@@ -422,6 +547,162 @@ describe('tools', function () {
         ])->assertHasErrors(["Project with UUID '33333333-3333-3333-3333-333333333333' not found."]);
     });
 
+    it('creates a branch that does not exist yet from the base branch it is given', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('addProjectWorkspace')->once()
+                ->with($project, 'feature', 'main')
+                ->andReturn(componentWorkspaceData('/tmp/beta-feature'));
+        });
+
+        $this->mock(GitService::class)
+            ->shouldReceive('doesBranchExist')->once()->with('/tmp/beta', 'feature')->andReturn(false);
+
+        LaborForestServer::tool(AddWorkspaceTool::class, [
+            'path' => '/tmp/beta',
+            'branch' => 'feature',
+            'base_branch' => 'main',
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('requires a base branch only for a branch that does not exist yet', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('addProjectWorkspace')->never();
+        });
+
+        $this->mock(GitService::class)
+            ->shouldReceive('doesBranchExist')->once()->with('/tmp/beta', 'feature')->andReturn(false);
+
+        LaborForestServer::tool(AddWorkspaceTool::class, ['path' => '/tmp/beta', 'branch' => 'feature'])
+            ->assertHasErrors(['The base branch field is required.']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a repository whose branches it cannot list', function () {
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('addProjectWorkspace')->never();
+        });
+
+        $this->mock(GitService::class)
+            ->shouldReceive('doesBranchExist')->once()
+            ->andThrow(new GitOperationFailed('list branches', 'not a git repository'));
+
+        LaborForestServer::tool(AddWorkspaceTool::class, ['path' => '/tmp/beta', 'branch' => 'feature'])
+            ->assertHasErrors([(new GitOperationFailed('list branches', 'not a git repository'))->getMessage()]);
+    });
+
+    it('reports a workspace directory it cannot create', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $project = componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta');
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use ($project) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([$project]));
+            $mock->shouldReceive('addProjectWorkspace')->once()
+                ->andThrow(new WorkspaceDirectoryExists('/tmp/beta-feature'));
+        });
+
+        $this->mock(GitService::class)
+            ->shouldReceive('doesBranchExist')->once()->andReturn(true);
+
+        LaborForestServer::tool(AddWorkspaceTool::class, ['path' => '/tmp/beta', 'branch' => 'feature'])
+            ->assertHasErrors([(new WorkspaceDirectoryExists('/tmp/beta-feature'))->getMessage()]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses to add a workspace naming neither a path nor a uuid', function () {
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjects')->never();
+            $mock->shouldReceive('loadProject')->never();
+        });
+
+        LaborForestServer::tool(AddWorkspaceTool::class, ['branch' => 'feature'])
+            ->assertHasErrors(['The path field is required when uuid is not present.']);
+    });
+
+    it('names the example workflow sets it does offer when it refuses one', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('listExampleWorkflowPaths')->andReturn(collect([
+                'example-workflows/bare',
+                'example-workflows/laravel',
+            ]));
+
+        LaborForestServer::tool(AddWorkspaceExampleWorkflowsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'example' => 'nope',
+        ])->assertHasErrors(['The selected example is invalid.']);
+    });
+
+    it('reports a path that is not a workspace to seed example workflows into', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('listExampleWorkflowPaths')->andReturn(collect(['example-workflows/bare']));
+            $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/nope')
+                ->andThrow(new WorkspaceNotFound('/tmp/nope'));
+            $mock->shouldReceive('initializeWorkspaceStarterWorkflows')->never();
+        });
+
+        LaborForestServer::tool(AddWorkspaceExampleWorkflowsTool::class, [
+            'path' => '/tmp/nope',
+            'example' => 'bare',
+        ])->assertHasErrors(["Workspace at path '/tmp/nope' not found."]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a workspace whose project is not registered when seeding example workflows', function () {
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('listExampleWorkflowPaths')->andReturn(collect(['example-workflows/bare']));
+            $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo-feature')
+                ->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()->andReturnNull();
+            $mock->shouldReceive('initializeWorkspaceStarterWorkflows')->never();
+        });
+
+        LaborForestServer::tool(AddWorkspaceExampleWorkflowsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'example' => 'bare',
+        ])->assertHasErrors(['Failed to find workspace project.']);
+    });
+
+    it('reports example workflows it cannot write into the workspace', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('listExampleWorkflowPaths')->andReturn(collect(['example-workflows/bare']));
+            $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo-feature')
+                ->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()
+                ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
+            $mock->shouldReceive('initializeWorkspaceStarterWorkflows')->once()
+                ->andThrow(new RuntimeException('Permission denied'));
+        });
+
+        LaborForestServer::tool(AddWorkspaceExampleWorkflowsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'example' => 'bare',
+        ])->assertHasErrors(['Permission denied']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
     it('reports a project directory it cannot add', function () {
         $this->mock(ProjectsService::class)
             ->shouldReceive('addProject')->once()->with('/tmp/nope')
@@ -429,6 +710,85 @@ describe('tools', function () {
 
         LaborForestServer::tool(AddProjectTool::class, ['path' => '/tmp/nope/'])
             ->assertHasErrors([(new ProjectDirectoryNotFound('/tmp/nope'))->getMessage()]);
+    });
+
+    it('reads back the workflow it validated for the workspace at the path', function () {
+        $workflowPath = '/tmp/repo-feature/.laborforest/workflows/up.yaml';
+
+        mcpWorkspaceIsResolved();
+        mcpWorkflowFileExists($workflowPath);
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) use ($workflowPath) {
+            $mock->shouldReceive('workflowPath')->once()->with('/tmp/repo-feature', 'up')->andReturn($workflowPath);
+            $mock->shouldReceive('loadWorkflow')->once()->with($workflowPath)->andReturn(componentWorkflowData(
+                [
+                    componentStepData(),
+                    componentStepData(name: 'Run down', run: 'down', type: WorkflowStepType::WORKFLOW),
+                ],
+                requireStatus: WorkspaceStatus::SUSPENDED,
+                endingStatus: WorkspaceStatus::READY,
+            ));
+            $mock->shouldReceive('dispatchWorkflow')->never();
+        });
+
+        // The trailing slash is trimmed before the workspace is looked up
+        LaborForestServer::tool(ValidateWorkflowTool::class, ['path' => '/tmp/repo-feature/', 'workflow' => 'up'])
+            ->assertOk()
+            ->assertSee(mcpJson([
+                'workflow' => 'up',
+                'path' => $workflowPath,
+                'require_status' => 'suspended',
+                'ending_status' => 'ready',
+                'steps' => [
+                    ['name' => 'Install dependencies', 'type' => 'shell'],
+                    ['name' => 'Run down', 'type' => 'workflow'],
+                ],
+            ]));
+    });
+
+    it('reports a workflow name matching no file before validating it', function () {
+        mcpWorkspaceIsResolved();
+        mcpWorkflowFileExists('/tmp/repo-feature/.laborforest/workflows/up.yaml');
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('workflowPath')->once()->with('/tmp/repo-feature', 'down')
+                ->andReturn('/tmp/repo-feature/.laborforest/workflows/down.yaml');
+            $mock->shouldReceive('loadWorkflow')->never();
+        });
+
+        LaborForestServer::tool(ValidateWorkflowTool::class, ['path' => '/tmp/repo-feature', 'workflow' => 'down'])
+            ->assertHasErrors(["Workflow 'down' does not exist."]);
+    });
+
+    it('reports every structural problem of a workflow it cannot load', function () {
+        $workflowPath = '/tmp/repo-feature/.laborforest/workflows/up.yaml';
+
+        mcpWorkspaceIsResolved();
+        mcpWorkflowFileExists($workflowPath);
+
+        $this->mock(WorkflowService::class, function (MockInterface $mock) use ($workflowPath) {
+            $mock->shouldReceive('workflowPath')->once()->andReturn($workflowPath);
+            $mock->shouldReceive('loadWorkflow')->once()->andThrow(InvalidWorkflowFile::withProblems($workflowPath, [
+                'The steps field is required.',
+                'The sort order field must be an integer.',
+            ]));
+        });
+
+        LaborForestServer::tool(ValidateWorkflowTool::class, ['path' => '/tmp/repo-feature', 'workflow' => 'up'])
+            ->assertHasErrors([
+                "The workflow file [{$workflowPath}] is invalid: The steps field is required. The sort order field must be an integer.",
+            ]);
+    });
+
+    it('reports a path that is not a workspace to validate a workflow in', function () {
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/nope')
+            ->andThrow(new WorkspaceNotFound('/tmp/nope'));
+
+        $this->mock(WorkflowService::class)->shouldReceive('loadWorkflow')->never();
+
+        LaborForestServer::tool(ValidateWorkflowTool::class, ['path' => '/tmp/nope', 'workflow' => 'up'])
+            ->assertHasErrors(["Workspace at path '/tmp/nope' not found."]);
     });
 
     it('dispatches every step of the named workflow for the workspace at the path', function () {

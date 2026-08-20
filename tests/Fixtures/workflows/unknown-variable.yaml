@@ -1,0 +1,13 @@
+resource_type: workflow
+require_status: suspended
+ending_status: ready
+sort_order: 1
+steps:
+    - name: 'Write the environment'
+      type: update_env
+      map:
+        APP_URL: 'http://{{ NOPE }}.test'
+    - name: 'Serve'
+      type: shell
+      if: 'test -f {{ ALSO_NOPE }}'
+      run: 'open "{{ WORKSPACE_DIR }}"'

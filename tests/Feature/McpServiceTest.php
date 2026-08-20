@@ -155,6 +155,28 @@ describe('restartMcpServer', function () {
         expect($calls)->toBe(['stop', 'artisan']);
     });
 
+    it('leaves the server stopped when a restart finds mcp switched off', function () {
+        // reachable from the settings screen, which decides what to do from the values it is saving
+        // rather than from the file the service reads back
+        ($this->writeSettings)(['mcp_enabled' => false]);
+
+        $calls = [];
+
+        $this->mock(ChildProcessContract::class, function ($mock) use (&$calls) {
+            $mock->shouldReceive('get')->twice()->with($this->alias)->andReturn($mock, null);
+
+            $mock->shouldReceive('stop')->once()->andReturnUsing(function () use (&$calls) {
+                $calls[] = 'stop';
+            });
+
+            $mock->shouldReceive('artisan')->never();
+        });
+
+        expect(fn () => $this->mcp->restartMcpServer())->toThrow(McpServerNotEnabled::class);
+
+        expect($calls)->toBe(['stop']);
+    });
+
     it('throws rather than starting a second server when the old one will not exit', function () {
         ($this->writeSettings)(['mcp_enabled' => true]);
 
