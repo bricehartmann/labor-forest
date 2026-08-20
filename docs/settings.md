@@ -20,9 +20,9 @@ Dark mode is controlled by a toggle switch and is enabled by default. This toggl
 
 ## MCP
 
-LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). The server is local: it listens on `127.0.0.1` only, and it runs for as long as the app does.
+LaborForest can expose itself to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). The server is local: it listens on `127.0.0.1` only, and it runs for as long as the app does. This section covers the settings; the tools and resources the server exposes, and what an agent can do with them, are covered in [MCP](mcp.md).
 
-`Enable MCP` starts and stops the server. `MCP local port` sets the port it listens on, accepting any whole number from `1024` to `49151` and defaulting to `9189`. Saving a changed port stops the running server and starts a new one on the new port.
+`Enable MCP` starts and stops the server, and is enabled by default. `MCP local port` sets the port it listens on, accepting any whole number from `1024` to `49151` and defaulting to `9189`. Saving a changed port stops the running server and starts a new one on the new port.
 
 With MCP enabled, the section shows one read-only field, `Add to Claude Code`: the one-line `claude mcp add` command that registers the server's endpoint, for example `http://127.0.0.1:9189/mcp/laborforest`. It copies to the clipboard when clicked, and it tracks the port field as you type it, before you save.
 

@@ -63,7 +63,7 @@ class AddWorkspaceExampleWorkflowsTool extends Tool
     {
         $exampleWorkflows = app(ProjectsService::class)->listExampleWorkflowPaths()
             ->map(fn (string $path) => basename($path))
-            ->join(',');
+            ->join(', ');
 
         return [
             'path' => $schema
@@ -72,7 +72,7 @@ class AddWorkspaceExampleWorkflowsTool extends Tool
                 ->required(),
             'example' => $schema
                 ->string()
-                ->description('Which example of workflows to add. Must be one of: '.$exampleWorkflows)
+                ->description(sprintf('Which example workflows to add. Must be one of [%s].', $exampleWorkflows))
                 ->required(),
         ];
     }

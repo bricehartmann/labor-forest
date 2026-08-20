@@ -2,6 +2,7 @@
 
 use App\Data\ProjectData;
 use App\Data\SettingsData;
+use App\Data\WorkspaceData;
 use App\Enums\McpUri;
 use App\Enums\WorkspaceStatus;
 use App\Events\GlobalRefresh;
@@ -9,6 +10,7 @@ use App\Exceptions\InvalidProjectsFile;
 use App\Exceptions\InvalidSettingsFile;
 use App\Exceptions\ProjectDirectoryNotFound;
 use App\Exceptions\ProjectNotFound;
+use App\Exceptions\WorkflowLogsNotDeleted;
 use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Mcp\Resources\ProjectResource;
@@ -22,8 +24,11 @@ use App\Mcp\Tools\FindProjectByPathTool;
 use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
 use App\Mcp\Tools\LaunchTerminalTool;
+use App\Mcp\Tools\PurgeWorkflowLogsTool;
 use App\Mcp\Tools\RemoveProjectTool;
 use App\Mcp\Tools\RunWorkflowTool;
+use App\Mcp\Tools\UpdateProjectLaunchCommandsTool;
+use App\Mcp\Tools\UpdateSettingsTool;
 use App\Services\GitService;
 use App\Services\LaunchService;
 use App\Services\ProjectsService;
@@ -81,8 +86,7 @@ describe('resources', function () {
             ->toBe([
                 'laborforest://settings',
                 'laborforest://projects',
-                // TemplateVariablesResource declares no uri, so the package derives this one
-                'file://resources/template-variables-resource',
+                'laborforest://template-variables',
             ])
             ->and($context->resourceTemplates()->map(fn (Resource $resource) => $resource->name())->values()->all())
             ->toBe(['project', 'workspaces'])
@@ -203,8 +207,10 @@ describe('tools', function () {
                 'remove-project',
                 'add-workspace',
                 'add-workspace-example-workflows',
-                'dispatch-workflow',
+                'run-workflow',
                 'update-settings',
+                'update-project-launch-commands',
+                'purge-workflow-logs',
             ]);
     });
 
@@ -510,6 +516,392 @@ describe('tools', function () {
             'remove_worktrees' => false,
         ])->assertHasErrors(["Project with UUID '33333333-3333-3333-3333-333333333333' not found."]);
     });
+
+    it('writes each updated setting to its own field', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $saved = null;
+
+        $this->mock(SettingsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadSettings')->once()->andReturn(SettingsData::defaults());
+            $mock->shouldReceive('saveSettings')->once()
+                ->andReturnUsing(function (SettingsData $settings) use (&$saved) {
+                    $saved = $settings;
+                });
+        });
+
+        LaborForestServer::tool(UpdateSettingsTool::class, [
+            'dark_mode' => false,
+            'workflow_step_timeout_seconds' => 45,
+            'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
+            'command_launch_browser' => 'open "{{ ENV_APP_URL }}" -a safari',
+            'command_launch_terminal' => 'open "{{ WORKSPACE_DIR }}" -a ghostty',
+        ])->assertOk()->assertSee('success');
+
+        expect($saved->dark_mode)->toBeFalse()
+            ->and($saved->workflow_step_timeout_seconds)->toBe(45)
+            ->and($saved->command_launch_ide)->toBe('open "{{ WORKSPACE_DIR }}" -a zed')
+            ->and($saved->command_launch_browser)->toBe('open "{{ ENV_APP_URL }}" -a safari')
+            ->and($saved->command_launch_terminal)->toBe('open "{{ WORKSPACE_DIR }}" -a ghostty');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('leaves an omitted or null setting at the value it already held', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $saved = null;
+
+        $this->mock(SettingsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadSettings')->once()->andReturn(SettingsData::defaults());
+            $mock->shouldReceive('saveSettings')->once()
+                ->andReturnUsing(function (SettingsData $settings) use (&$saved) {
+                    $saved = $settings;
+                });
+        });
+
+        LaborForestServer::tool(UpdateSettingsTool::class, [
+            'workflow_step_timeout_seconds' => 45,
+            'command_launch_ide' => null,
+        ])->assertOk()->assertSee('success');
+
+        $defaults = SettingsData::defaults();
+
+        expect($saved->workflow_step_timeout_seconds)->toBe(45)
+            ->and($saved->dark_mode)->toBe($defaults->dark_mode)
+            ->and($saved->command_launch_ide)->toBe($defaults->command_launch_ide)
+            ->and($saved->command_launch_browser)->toBe($defaults->command_launch_browser)
+            ->and($saved->command_launch_terminal)->toBe($defaults->command_launch_terminal);
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses a launch command naming a variable it does not recognize', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(SettingsService::class)->shouldNotReceive('saveSettings');
+
+        LaborForestServer::tool(UpdateSettingsTool::class, [
+            'command_launch_terminal' => 'open "{{ NOPE }}"',
+        ])->assertHasErrors(['Unknown variables: {{ NOPE }}.']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a settings file it cannot read before updating it', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(SettingsService::class)
+            ->shouldReceive('loadSettings')->once()
+            ->andThrow(new InvalidSettingsFile('.laborforest/settings.yaml', ['broken']));
+
+        LaborForestServer::tool(UpdateSettingsTool::class, ['dark_mode' => false])
+            ->assertHasErrors(['The settings file [.laborforest/settings.yaml] is invalid: broken']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('clears a global launch command given an empty string', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $saved = null;
+
+        $this->mock(SettingsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadSettings')->once()->andReturn(SettingsData::defaults());
+            $mock->shouldReceive('saveSettings')->once()
+                ->andReturnUsing(function (SettingsData $settings) use (&$saved) {
+                    $saved = $settings;
+                });
+        });
+
+        LaborForestServer::tool(UpdateSettingsTool::class, [
+            'command_launch_ide' => '',
+        ])->assertOk()->assertSee('success');
+
+        expect($saved->command_launch_ide)->toBeNull()
+            ->and($saved->command_launch_browser)->toBe(SettingsData::defaults()->command_launch_browser);
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('writes each launch command override to the project at the path', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $saved = null;
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([
+                componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta'),
+            ]));
+            $mock->shouldReceive('updateProject')->once()
+                ->andReturnUsing(function (ProjectData $project) use (&$saved) {
+                    $saved = $project;
+                });
+        });
+
+        // The trailing slash is trimmed before the project is looked up
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'path' => '/tmp/beta/',
+            'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
+            'command_launch_browser' => 'open "{{ ENV_APP_URL }}" -a safari',
+            'command_launch_terminal' => 'open "{{ WORKSPACE_DIR }}" -a ghostty',
+        ])->assertOk()->assertSee('success');
+
+        expect($saved->uuid)->toBe('22222222-2222-2222-2222-222222222222')
+            ->and($saved->command_launch_ide)->toBe('open "{{ WORKSPACE_DIR }}" -a zed')
+            ->and($saved->command_launch_browser)->toBe('open "{{ ENV_APP_URL }}" -a safari')
+            ->and($saved->command_launch_terminal)->toBe('open "{{ WORKSPACE_DIR }}" -a ghostty');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('writes a launch command override to the project the uuid names', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $saved = null;
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadProject')->once()->with('22222222-2222-2222-2222-222222222222')
+                ->andReturn(componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta'));
+            $mock->shouldReceive('updateProject')->once()
+                ->andReturnUsing(function (ProjectData $project) use (&$saved) {
+                    $saved = $project;
+                });
+        });
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'uuid' => '22222222-2222-2222-2222-222222222222',
+            'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
+        ])->assertOk()->assertSee('success');
+
+        expect($saved->command_launch_ide)->toBe('open "{{ WORKSPACE_DIR }}" -a zed');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('clears a launch command override given an empty string', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $saved = null;
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([
+                componentProjectData(
+                    '22222222-2222-2222-2222-222222222222',
+                    '/tmp/beta',
+                    ide: 'open "{{ WORKSPACE_DIR }}" -a zed',
+                    browser: 'open "{{ ENV_APP_URL }}" -a safari',
+                ),
+            ]));
+            $mock->shouldReceive('updateProject')->once()
+                ->andReturnUsing(function (ProjectData $project) use (&$saved) {
+                    $saved = $project;
+                });
+        });
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'path' => '/tmp/beta',
+            'command_launch_ide' => '',
+        ])->assertOk()->assertSee('success');
+
+        // a cleared override is stored as null rather than as the blank it arrived as, so the
+        // project falls back to the global command
+        expect($saved->command_launch_ide)->toBeNull()
+            ->and($saved->command_launch_browser)->toBe('open "{{ ENV_APP_URL }}" -a safari');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('leaves an omitted or null launch command override at the value it already held', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $saved = null;
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) use (&$saved) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([
+                componentProjectData(
+                    '22222222-2222-2222-2222-222222222222',
+                    '/tmp/beta',
+                    ide: 'open "{{ WORKSPACE_DIR }}" -a zed',
+                    browser: 'open "{{ ENV_APP_URL }}" -a safari',
+                    terminal: 'open "{{ WORKSPACE_DIR }}" -a ghostty',
+                ),
+            ]));
+            $mock->shouldReceive('updateProject')->once()
+                ->andReturnUsing(function (ProjectData $project) use (&$saved) {
+                    $saved = $project;
+                });
+        });
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'path' => '/tmp/beta',
+            'command_launch_ide' => null,
+        ])->assertOk()->assertSee('success');
+
+        expect($saved->command_launch_ide)->toBe('open "{{ WORKSPACE_DIR }}" -a zed')
+            ->and($saved->command_launch_browser)->toBe('open "{{ ENV_APP_URL }}" -a safari')
+            ->and($saved->command_launch_terminal)->toBe('open "{{ WORKSPACE_DIR }}" -a ghostty');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses a launch command override naming a variable it does not recognize', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)->shouldNotReceive('updateProject');
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'path' => '/tmp/beta',
+            'command_launch_terminal' => 'open "{{ NOPE }}"',
+        ])->assertHasErrors(['Unknown variables: {{ NOPE }}.']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses a launch command override naming neither a path nor a uuid', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)->shouldNotReceive('updateProject');
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
+        ])->assertHasErrors(['The path field is required when uuid is not present.']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a launch command override path that matches no project', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect());
+            $mock->shouldNotReceive('updateProject');
+        });
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'path' => '/tmp/nope',
+            'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
+        ])->assertHasErrors(['Failed to find project.']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a launch command override uuid that matches no project', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProject')->once()
+                ->andThrow(new ProjectNotFound('33333333-3333-3333-3333-333333333333'));
+            $mock->shouldNotReceive('updateProject');
+        });
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'uuid' => '33333333-3333-3333-3333-333333333333',
+            'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
+        ])->assertHasErrors(["Project with UUID '33333333-3333-3333-3333-333333333333' not found."]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a projects file it cannot write the launch command override to', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjects')->once()->andReturn(collect([
+                componentProjectData('22222222-2222-2222-2222-222222222222', '/tmp/beta'),
+            ]));
+            $mock->shouldReceive('updateProject')->once()
+                ->andThrow(new InvalidProjectsFile('.laborforest/projects.yaml', ['broken']));
+        });
+
+        LaborForestServer::tool(UpdateProjectLaunchCommandsTool::class, [
+            'path' => '/tmp/beta',
+            'command_launch_ide' => 'open "{{ WORKSPACE_DIR }}" -a zed',
+        ])->assertHasErrors(['The projects file [.laborforest/projects.yaml] is invalid: broken']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('purges the run logs of the named workflow in the workspace at the path', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved();
+
+        $this->mock(WorkflowService::class)
+            ->shouldReceive('purgeWorkflowLogs')->once()
+            ->with(Mockery::on(fn (WorkspaceData $workspace) => $workspace->path === '/tmp/repo-feature'), 'up')
+            ->andReturn(['purged' => 4, 'skipped' => 0]);
+
+        // The trailing slash is trimmed before the workspace is looked up
+        LaborForestServer::tool(PurgeWorkflowLogsTool::class, [
+            'path' => '/tmp/repo-feature/',
+            'workflow' => 'up',
+        ])->assertOk()->assertSee('Purged 4 log records.');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('reports the runs it left alone alongside the ones it purged', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved();
+
+        $this->mock(WorkflowService::class)
+            ->shouldReceive('purgeWorkflowLogs')->once()->andReturn(['purged' => 4, 'skipped' => 1]);
+
+        LaborForestServer::tool(PurgeWorkflowLogsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'workflow' => 'up',
+        ])->assertOk()->assertSee('Purged 4 log records. Skipped 1 still in progress.');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('reports purging nothing rather than failing on a workflow with no run logs', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved();
+
+        // no check that the workflow file exists: logs outlive the workflow that wrote them
+        $this->mock(WorkflowService::class)
+            ->shouldReceive('purgeWorkflowLogs')->once()->andReturn(['purged' => 0, 'skipped' => 0]);
+
+        LaborForestServer::tool(PurgeWorkflowLogsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'workflow' => 'deleted',
+        ])->assertOk()->assertSee('Purged 0 log records.');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a workspace it cannot purge the run logs of', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/nope')
+            ->andThrow(new WorkspaceNotFound('/tmp/nope'));
+
+        LaborForestServer::tool(PurgeWorkflowLogsTool::class, ['path' => '/tmp/nope', 'workflow' => 'up'])
+            ->assertHasErrors([(new WorkspaceNotFound('/tmp/nope'))->getMessage()]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports run log files it cannot delete', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved();
+
+        $this->mock(WorkflowService::class)
+            ->shouldReceive('purgeWorkflowLogs')->once()->andThrow(new WorkflowLogsNotDeleted('up'));
+
+        LaborForestServer::tool(PurgeWorkflowLogsTool::class, [
+            'path' => '/tmp/repo-feature',
+            'workflow' => 'up',
+        ])->assertHasErrors(['Failed to delete the log records of workflow [up].']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
 });
 
 dataset('launch tools', [
@@ -554,4 +946,17 @@ function mcpWorkflowFileExists(string $workflowPath): void
         ->andReturnUsing(fn (string $path) => str_starts_with($path, '/tmp/')
             ? $path === $workflowPath
             : is_file($path));
+}
+
+/**
+ * Answer the workspace lookup ResolvesWorkspace performs for the standard fixture workspace.
+ */
+function mcpWorkspaceIsResolved(): void
+{
+    test()->mock(ProjectsService::class, function (MockInterface $mock) {
+        $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo-feature')
+            ->andReturn(componentWorkspaceData('/tmp/repo-feature'));
+        $mock->shouldReceive('loadProjectFromWorkspace')->once()->with('/tmp/repo-feature')
+            ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
+    });
 }

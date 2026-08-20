@@ -2,7 +2,7 @@
 
 namespace App\Mcp\Tools;
 
-use App\Data\ProjectData;
+use App\Concerns\Mcp\ResolvesProject;
 use App\Events\GlobalRefresh;
 use App\Services\GitService;
 use App\Services\ProjectsService;
@@ -21,6 +21,8 @@ use Throwable;
 #[Description('Add a new workspace for an existing project for either a new or existing git branch.')]
 class AddWorkspaceTool extends Tool
 {
+    use ResolvesProject;
+
     /**
      * Handle the tool request.
      */
@@ -33,22 +35,13 @@ class AddWorkspaceTool extends Tool
             'base_branch' => 'nullable',
         ]);
 
-        $projectService = app(ProjectsService::class);
+        $project = $this->resolveProject($validated['path'] ?? null, $validated['uuid'] ?? null);
+
+        if ($project instanceof Response) {
+            return $project;
+        }
 
         try {
-            if (! empty($validated['path'])) {
-                /** @var ProjectData|null $project */
-                $project = $projectService
-                    ->loadProjects()
-                    ->firstWhere(fn (ProjectData $data) => $data->path === $validated['path']);
-
-                if (! $project) {
-                    return Response::error('Failed to find project.');
-                }
-            } else {
-                $project = $projectService->loadProject($validated['uuid']);
-            }
-
             $branchExists = app(GitService::class)->doesBranchExist($project->path, $validated['branch']);
         } catch (Throwable $th) {
             return Response::error($th->getMessage());
@@ -61,7 +54,7 @@ class AddWorkspaceTool extends Tool
         }
 
         try {
-            $projectService->addProjectWorkspace(
+            app(ProjectsService::class)->addProjectWorkspace(
                 $project,
                 $validated['branch'],
                 $validated['base_branch'] ?? null,
@@ -85,11 +78,11 @@ class AddWorkspaceTool extends Tool
         return [
             'path' => $schema
                 ->string()
-                ->description('The full directory path to a project. Required without uuid.')
+                ->description('The full directory path to a project. Required without `uuid`.')
                 ->nullable(),
             'uuid' => $schema
                 ->string()
-                ->description('The project UUID. Required without path.')
+                ->description('The project UUID. Required without `path`.')
                 ->nullable(),
             'branch' => $schema
                 ->string()

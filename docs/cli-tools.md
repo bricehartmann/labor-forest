@@ -35,6 +35,6 @@ LaborForest does not need to be running in order to run the above commands. If t
 
 ---
 
-| Previous                                        | Next |
-|-------------------------------------------------|------|
-| [Example with Laravel](example-with-laravel.md) |      |
+| Previous                                        | Next          |
+|-------------------------------------------------|---------------|
+| [Example with Laravel](example-with-laravel.md) | [MCP](mcp.md) |

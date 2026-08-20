@@ -59,15 +59,15 @@ class UpdateSettingsTool extends Tool
             }
 
             if ($request->get('command_launch_ide') !== null) {
-                $settings->command_launch_ide = $request->get('command_launch_ide');
+                $settings->command_launch_ide = $this->commandOrNull($request->get('command_launch_ide'));
             }
 
             if ($request->get('command_launch_browser') !== null) {
-                $settings->command_launch_ide = $request->get('command_launch_browser');
+                $settings->command_launch_browser = $this->commandOrNull($request->get('command_launch_browser'));
             }
 
             if ($request->get('command_launch_terminal') !== null) {
-                $settings->command_launch_ide = $request->get('command_launch_terminal');
+                $settings->command_launch_terminal = $this->commandOrNull($request->get('command_launch_terminal'));
             }
 
             $settingsService->saveSettings($settings);
@@ -81,6 +81,18 @@ class UpdateSettingsTool extends Tool
     }
 
     /**
+     * Normalize a cleared command to null.
+     *
+     * LaunchService treats a falsy command as nothing to launch, so an empty string already stops
+     * the launch. Storing null instead keeps the settings file saying what it means, and matches
+     * what the Settings screen writes for a blank field.
+     */
+    protected function commandOrNull(string $command): ?string
+    {
+        return filled($command) ? $command : null;
+    }
+
+    /**
      * Get the tool's input schema.
      *
      * @return array<string, Type>
@@ -90,25 +102,25 @@ class UpdateSettingsTool extends Tool
         return [
             'dark_mode' => $schema
                 ->boolean()
-                ->nullable()
-                ->description('If dark mode is enabled. Omit or specify null to keep current value.'),
+                ->description('If dark mode is enabled. Omit or specify `null` to keep the current value.')
+                ->nullable(),
             'workflow_step_timeout_seconds' => $schema
                 ->integer()
                 ->min(0)
-                ->nullable()
-                ->description('Workflow step timeout in seconds. Omit or specify null to keep current value.'),
+                ->description('Workflow step timeout in seconds. Omit or specify `null` to keep the current value.')
+                ->nullable(),
             'command_launch_ide' => $schema
                 ->string()
-                ->nullable()
-                ->description('The global command launch an IDE. Supports template variables in mustache syntax. See resource: template-variables'),
+                ->description('The global command to launch an IDE. Supports template variables in mustache syntax. See the `template-variables` resource. Omit or specify `null` to keep the current value, or specify an empty string to clear the command.')
+                ->nullable(),
             'command_launch_browser' => $schema
                 ->string()
-                ->nullable()
-                ->description('The global command launch a web browser. Supports template variables in mustache syntax. See resource: template-variables'),
+                ->description('The global command to launch a web browser. Supports template variables in mustache syntax. See the `template-variables` resource. Omit or specify `null` to keep the current value, or specify an empty string to clear the command.')
+                ->nullable(),
             'command_launch_terminal' => $schema
                 ->string()
-                ->nullable()
-                ->description('The global command launch a terminal. Supports template variables in mustache syntax. See resource: template-variables'),
+                ->description('The global command to launch a terminal. Supports template variables in mustache syntax. See the `template-variables` resource. Omit or specify `null` to keep the current value, or specify an empty string to clear the command.')
+                ->nullable(),
         ];
     }
 }

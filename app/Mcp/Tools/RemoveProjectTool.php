@@ -51,15 +51,15 @@ class RemoveProjectTool extends Tool
         return [
             'uuid' => $schema
                 ->string()
-                ->description('The project UUID')
+                ->description('The project UUID.')
                 ->required(),
             'remove_directory' => $schema
                 ->boolean()
-                ->description('If the .laborforest directory should be removed')
+                ->description('If the `.laborforest` directory should be removed.')
                 ->required(),
             'remove_worktrees' => $schema
                 ->boolean()
-                ->description('If the project worktrees should be removed')
+                ->description('If the project worktrees should be removed.')
                 ->required(),
         ];
     }

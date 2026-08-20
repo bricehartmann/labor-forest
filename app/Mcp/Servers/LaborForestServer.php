@@ -14,8 +14,10 @@ use App\Mcp\Tools\FindProjectByPathTool;
 use App\Mcp\Tools\LaunchBrowserTool;
 use App\Mcp\Tools\LaunchIdeTool;
 use App\Mcp\Tools\LaunchTerminalTool;
+use App\Mcp\Tools\PurgeWorkflowLogsTool;
 use App\Mcp\Tools\RemoveProjectTool;
 use App\Mcp\Tools\RunWorkflowTool;
+use App\Mcp\Tools\UpdateProjectLaunchCommandsTool;
 use App\Mcp\Tools\UpdateSettingsTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -26,7 +28,7 @@ use Laravel\Mcp\Server\Contracts\Transport;
 #[Instructions(<<<'INSTRUCTIONS'
 LaborForest is a macOS desktop app for managing the git worktrees of your local repositories and running local workflows inside them.
 It exists to set up, tear down, and otherwise methodically modify local development environments.
-Any directory other than the $HOME directory that contains a `.laborforest` directory is a workspace.
+Any directory other than the `$HOME` directory that contains a `.laborforest` directory is a workspace.
 INSTRUCTIONS)]
 class LaborForestServer extends Server
 {
@@ -41,6 +43,8 @@ class LaborForestServer extends Server
         AddWorkspaceExampleWorkflowsTool::class,
         RunWorkflowTool::class,
         UpdateSettingsTool::class,
+        UpdateProjectLaunchCommandsTool::class,
+        PurgeWorkflowLogsTool::class,
     ];
 
     protected array $resources = [

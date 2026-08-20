@@ -14,6 +14,7 @@ use App\Enums\WorkflowStatus;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Exceptions\WorkflowLogsNotDeleted;
 use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Jobs\RunWorkflow;
@@ -325,6 +326,39 @@ class WorkflowService
         }
 
         return rescue(fn () => WorkflowRunLogData::from($yaml));
+    }
+
+    /**
+     * Delete the run logs one workflow has written in one workspace.
+     *
+     * A run still pending or running is counted and left on disk rather than deleted, because the
+     * RunWorkflow job holding it is still flushing step output into that file.
+     *
+     * @return array{purged: int, skipped: int}
+     *
+     * @throws WorkflowLogsNotDeleted
+     */
+    public function purgeWorkflowLogs(WorkspaceData $workspaceData, string $workflowName): array
+    {
+        [$locked, $purgeable] = $this->loadWorkflowLogSummaryData($workspaceData)
+            ->filter(fn (WorkflowRunLogSummaryData $data) => $data->name === $workflowName)
+            ->partition(fn (WorkflowRunLogSummaryData $data) => $data->status->isLocked());
+
+        if ($purgeable->isEmpty()) {
+            return ['purged' => 0, 'skipped' => $locked->count()];
+        }
+
+        $logsPath = $this->logsPath($workspaceData->path);
+        $paths = $purgeable
+            ->map(fn (WorkflowRunLogSummaryData $data) => $logsPath.DIRECTORY_SEPARATOR.$data->id.'.'.FileExtension::YAML->value)
+            ->values()
+            ->all();
+
+        if (! File::delete($paths)) {
+            throw new WorkflowLogsNotDeleted($workflowName);
+        }
+
+        return ['purged' => $purgeable->count(), 'skipped' => $locked->count()];
     }
 
     private function logsPath(string $workspacePath): string

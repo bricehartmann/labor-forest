@@ -4,11 +4,9 @@ namespace App\Mcp\Tools;
 
 use App\Concerns\Mcp\ResolvesWorkspace;
 use App\Events\GlobalRefresh;
-use App\Services\SettingsService;
 use App\Services\WorkflowService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -16,12 +14,14 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 use Throwable;
 
-#[Name('run-workflow')]
-#[Title('Run Workflow')]
-#[Description('Dispatch a local workflow to run within a workspace by path. Every step of the workflow runs. Returns the unique workflow ID on success.')]
-class RunWorkflowTool extends Tool
+#[IsDestructive]
+#[Name('purge-workflow-logs')]
+#[Title('Purge Workflow Logs')]
+#[Description('Delete the run log records of a single workflow within a workspace by path. Runs that are still pending or running are left alone.')]
+class PurgeWorkflowLogsTool extends Tool
 {
     use ResolvesWorkspace;
 
@@ -36,33 +36,28 @@ class RunWorkflowTool extends Tool
             return $resolved;
         }
 
-        [$project, $workspace] = $resolved;
+        [, $workspace] = $resolved;
 
         $workflowName = $request->get('workflow');
-        $workflowService = app(WorkflowService::class);
 
-        // reported before the file is loaded, so a name that matches nothing reads as a missing
-        // workflow rather than as a parse failure
-        if (! File::isFile($workflowService->workflowPath($workspace->path, $workflowName))) {
-            return Response::error("Workflow '{$workflowName}' does not exist.");
-        }
-
+        // deliberately not gated on the workflow file existing: run logs outlive the workflow that
+        // wrote them, and a deleted workflow is exactly when its logs are worth purging
         try {
-            $workflowRunLogId = $workflowService->dispatchWorkflow(
-                projectUuid: $project->uuid,
-                workspacePath: $workspace->path,
-                workflowName: $workflowName,
-                stepHashes: null,
-                parentLogId: null,
-                timeoutSeconds: app(SettingsService::class)->loadSettings()->workflow_step_timeout_seconds,
-            );
+            ['purged' => $purged, 'skipped' => $skipped] = app(WorkflowService::class)
+                ->purgeWorkflowLogs($workspace, $workflowName);
         } catch (Throwable $th) {
             return Response::error($th->getMessage());
         }
 
         broadcast(new GlobalRefresh);
 
-        return Response::text($workflowRunLogId)->asAssistant();
+        $message = "Purged {$purged} log records.";
+
+        if ($skipped > 0) {
+            $message .= " Skipped {$skipped} still in progress.";
+        }
+
+        return Response::text($message)->asAssistant();
     }
 
     /**
@@ -79,7 +74,7 @@ class RunWorkflowTool extends Tool
                 ->required(),
             'workflow' => $schema
                 ->string()
-                ->description('The name of the workflow with no file extension.')
+                ->description('The name of the workflow with no file extension. A name matching no log records purges nothing and is not an error.')
                 ->required(),
         ];
     }

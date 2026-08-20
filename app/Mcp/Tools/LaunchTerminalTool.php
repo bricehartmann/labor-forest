@@ -56,7 +56,7 @@ class LaunchTerminalTool extends Tool
         return [
             'path' => $schema
                 ->string()
-                ->description('The full directory path to a workspace')
+                ->description('The full directory path to a workspace.')
                 ->required(),
         ];
     }

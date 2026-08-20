@@ -12,6 +12,7 @@ use App\Enums\WorkflowStepType;
 use App\Enums\WorkspaceStatus;
 use App\Enums\YamlResourceType;
 use App\Exceptions\InvalidWorkflowFile;
+use App\Exceptions\WorkflowLogsNotDeleted;
 use App\Exceptions\WorkflowNotRunnable;
 use App\Exceptions\WorkspaceNotFound;
 use App\Jobs\RunWorkflow;
@@ -691,6 +692,70 @@ describe('loadWorkflowLogDatum', function () {
         'missing required keys' => ['20240105T000000Z_repo-logs_partial'],
         'wrong file extension' => ['20240106T000000Z_repo-logs_note'],
     ]);
+});
+
+describe('purgeWorkflowLogs', function () {
+    beforeEach(function () {
+        $this->purgeWorkspace = workflowWorkspaceData(fixtureWorkspacePath('repo-purge'));
+        $this->purgeLogsPath = fixtureWorkspacePath('repo-purge').'/.laborforest/ignored/logs';
+        $this->deletedPaths = null;
+        $this->deleteSucceeds = true;
+
+        // The fixture logs are committed and read-only, so only the delete is intercepted; every
+        // other File call, including the reads the summaries are built from, still hits disk
+        File::partialMock()
+            ->shouldReceive('delete')
+            ->andReturnUsing(function (array $paths) {
+                $this->deletedPaths = $paths;
+
+                return $this->deleteSucceeds;
+            });
+    });
+
+    it('deletes the finished runs of the named workflow alone', function () {
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'up'))
+            ->toBe(['purged' => 2, 'skipped' => 2])
+            ->and($this->deletedPaths)->toBe([
+                $this->purgeLogsPath.'/20240102T000000Z_repo-purge_up.yaml',
+                $this->purgeLogsPath.'/20240101T000000Z_repo-purge_up.yaml',
+            ]);
+    });
+
+    it('leaves the runs of another workflow in the same workspace alone', function () {
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'down'))
+            ->toBe(['purged' => 1, 'skipped' => 0])
+            ->and($this->deletedPaths)->toBe([
+                $this->purgeLogsPath.'/20240103T000000Z_repo-purge_down.yaml',
+            ]);
+    });
+
+    it('purges nothing for a workflow name matching no run log', function () {
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'nope'))
+            ->toBe(['purged' => 0, 'skipped' => 0])
+            ->and($this->deletedPaths)->toBeNull();
+    });
+
+    it('deletes nothing when every matching run is still in progress', function () {
+        // the delete would fail if it were reached, proving the skipped count is not a deleted one
+        $this->deleteSucceeds = false;
+
+        expect($this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'stuck'))
+            ->toBe(['purged' => 0, 'skipped' => 1])
+            ->and($this->deletedPaths)->toBeNull();
+    });
+
+    it('reads no logs from a workspace whose logs directory does not exist', function () {
+        expect($this->workflows->purgeWorkflowLogs(workflowWorkspaceData('/tmp/repo-feature'), 'up'))
+            ->toBe(['purged' => 0, 'skipped' => 0])
+            ->and($this->deletedPaths)->toBeNull();
+    });
+
+    it('throws when the log files cannot be deleted', function () {
+        $this->deleteSucceeds = false;
+
+        expect(fn () => $this->workflows->purgeWorkflowLogs($this->purgeWorkspace, 'up'))
+            ->toThrow(WorkflowLogsNotDeleted::class, 'Failed to delete the log records of workflow [up].');
+    });
 });
 
 describe('loadWorkflow', function () {

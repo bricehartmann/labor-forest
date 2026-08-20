@@ -55,7 +55,7 @@ class AddProjectTool extends Tool
         return [
             'path' => $schema
                 ->string()
-                ->description('The full directory path to a new project')
+                ->description('The full directory path to a new project.')
                 ->required(),
         ];
     }

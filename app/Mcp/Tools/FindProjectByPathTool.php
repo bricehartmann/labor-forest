@@ -20,7 +20,7 @@ use Throwable;
 #[IsReadOnly]
 #[Name('find-project-by-path')]
 #[Title('Find Project by Path')]
-#[Description('Find an individual project by full directory path')]
+#[Description('Find an individual project by full directory path.')]
 class FindProjectByPathTool extends Tool
 {
     /**
@@ -62,7 +62,7 @@ class FindProjectByPathTool extends Tool
         return [
             'path' => $schema
                 ->string()
-                ->description('The full directory path to a project')
+                ->description('The full directory path to a project.')
                 ->required(),
         ];
     }
