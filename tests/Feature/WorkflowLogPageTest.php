@@ -15,13 +15,10 @@ use App\Filament\Pages\Project;
 use App\Filament\Pages\WorkflowLog;
 use App\Services\ProjectsService;
 use App\Services\WorkflowService;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->uuid = '4f0f6c6e-1e21-4a2f-9a3e-8c6a0d2b7f11';
     $this->slug = 'repo-feature';
     $this->logId = '20240101T000000Z_repo-feature_up';

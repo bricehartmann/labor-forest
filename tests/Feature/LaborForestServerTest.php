@@ -4,6 +4,7 @@ use App\Data\ProjectData;
 use App\Data\SettingsData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
+use App\Enums\Disk;
 use App\Enums\McpUri;
 use App\Enums\Variable;
 use App\Enums\WorkflowStepType;
@@ -50,6 +51,7 @@ use App\Services\SettingsService;
 use App\Services\WorkflowService;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Contracts\Transport;
@@ -57,6 +59,15 @@ use Laravel\Mcp\Server\Prompt;
 use Laravel\Mcp\Server\Resource;
 use Laravel\Mcp\Server\Tool;
 use Mockery\MockInterface;
+
+beforeEach(function () {
+    // Read-only is what a fresh settings file carries, and every mutating tool is registered only
+    // when it is off (Concerns\Mcp\RegistersWhenWritable). The tools below are the writable ones,
+    // so the mode they need is written out rather than inherited from a disk that has no file.
+    Storage::disk(Disk::USER_HOME->value)->put('.laborforest/settings.yaml', settingsYaml([
+        'mcp_read_only' => false,
+    ]));
+});
 
 it('reports the application version to connecting clients', function () {
     config(['nativephp.version' => '1.2.3']);

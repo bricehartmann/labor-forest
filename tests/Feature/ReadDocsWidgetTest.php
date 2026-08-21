@@ -1,13 +1,8 @@
 <?php
 
 use App\Filament\Widgets\ReadDocsWidget;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\Fakes\ProcessSpy;
-
-beforeEach(function () {
-    Storage::fake('user_home');
-});
 
 describe('render', function () {
     it('renders the heading and description', function () {

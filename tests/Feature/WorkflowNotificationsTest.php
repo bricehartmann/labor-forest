@@ -5,13 +5,10 @@ use App\Events\WorkflowFinished;
 use App\Exceptions\ProjectNotFound;
 use App\Livewire\WorkflowNotifications;
 use App\Services\ProjectsService;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->uuid = '11111111-1111-1111-1111-111111111111';
     $this->slug = 'repo-feature';
     $this->logId = 'log-1';

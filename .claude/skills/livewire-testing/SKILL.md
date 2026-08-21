@@ -1,6 +1,6 @@
 ---
 name: livewire-testing
-description: "Use this skill whenever writing, editing, fixing, or reviewing a Pest feature test for a Livewire component in app/Livewire/ (WorkflowLogStep, WorkflowNotifications) or a Filament class in app/Filament/ — the Project, ProjectWorkflows, WorkflowLog and Settings pages, the AddProjectWidget and ProjectsLoadErrorWidget widgets. Trigger on any request to test a page, a widget, a page action, a table record action, a bulk action, a form save, a #[On('native:...')] broadcast listener, a #[Computed] property, a #[Locked] property, or a Filament notification. Also trigger when a component test fails with 'Disk [user_home] does not have a configured driver', 'Call to undefined function livewire()', 'Cannot redeclare function', 'Record arrays must have a unique [key] entry', a null $record in a table action closure, a BadMethodCallException from a mocked service, or a NativePHP System::timezone() / Dialog::new() call reaching the real Electron client. Covers: Livewire::test() mounting, route params as mount args, TestAction for table actions, mocking services with \\$this->mock(), fake subclasses from tests/Fakes/, test-only component subclasses as seams, Storage::fake('user_home'), and the no-preexisting-state rule. Do not use for app/Services/ (see service-testing), jobs, or app/Data/ DTOs."
+description: "Use this skill whenever writing, editing, fixing, or reviewing a Pest feature test for a Livewire component in app/Livewire/ (WorkflowLogStep, WorkflowNotifications) or a Filament class in app/Filament/ — the Project, ProjectWorkflows, WorkflowLog and Settings pages, the AddProjectWidget and ProjectsLoadErrorWidget widgets. Trigger on any request to test a page, a widget, a page action, a table record action, a bulk action, a form save, a #[On('native:...')] broadcast listener, a #[Computed] property, a #[Locked] property, or a Filament notification. Also trigger when a component test fails with 'Call to undefined function livewire()', 'Cannot redeclare function', 'Record arrays must have a unique [key] entry', a null $record in a table action closure, a BadMethodCallException from a mocked service, or a NativePHP System::timezone() / Dialog::new() call reaching the real Electron client. Covers: Livewire::test() mounting, route params as mount args, TestAction for table actions, mocking services with \\$this->mock(), fake subclasses from tests/Fakes/, test-only component subclasses as seams, the suite-wide user_home fake, and the no-preexisting-state rule. Do not use for app/Services/ (see service-testing), jobs, or app/Data/ DTOs."
 license: MIT
 metadata:
   author: labor-forest
@@ -22,10 +22,12 @@ run commands) belong to `pest-testing`. Neither is repeated here.
 
 - **Database**: nothing here reads or writes a domain table. Leave `RefreshDatabase` commented out in
   `tests/Pest.php` and never assert against the database.
-- **Disk**: never touch the developer's real `~/.laborforest/`. Put `Storage::fake('user_home')` in the
-  top-level `beforeEach` of every file — that disk is registered at runtime by NativePHP and **does not
-  exist** in a test boot, so anything reaching it dies with
-  `Disk [user_home] does not have a configured driver.`
+- **Disk**: never touch the developer's real `~/.laborforest/`. Nothing per-file is needed: `user_home`
+  is registered at runtime by NativePHP and does not exist in a test boot, so
+  `Tests\TestCase::createApplication()` registers a fake one before the container bootstraps — the panel
+  provider reads it while it registers, earlier than any `beforeEach` — and `tests/Pest.php` re-fakes the
+  same root before every test to empty it. Call `Storage::fake('user_home')` yourself only to capture the
+  handle.
 - Every component input is built inside the test.
 
 **2. No real filesystem and no real subprocess.** Components reach services; services reach git and
@@ -305,8 +307,11 @@ protected function selectProjectDirectory(): ?string
 ## Panel And Widget Gotchas
 
 - `AppPanelProvider::panel()` calls `ProjectsService::loadProjects()` and `SettingsService::loadSettings()`
-  at **boot**, wrapped in `rescue()` — long before any test body runs. Container substitutions cannot
-  affect panel navigation, so never assert on nav items.
+  at **boot**, wrapped in `rescue()` — long before any test body runs, against the empty `user_home` the
+  suite provides. Container substitutions cannot affect panel navigation, so never assert on nav items
+  from a component test; `AppPanelProviderTest` covers `panel()` by calling it directly.
+- `ProjectsLoadErrorWidget::canView()` is therefore **false** by default — an empty projects file loads
+  fine. A visibility test has to mock `loadProjects()` to throw.
 - Widget visibility is a static call: `ProjectsLoadErrorWidget::canView()` and `AddProjectWidget::canView()`
   go through `HasProjectsLoadError::projectsLoadErrorMessage()` to a freshly resolved `ProjectsService`.
   Drive it by mocking `loadProjects()`, then assert `canView()` directly — mounting is not required for
@@ -316,8 +321,8 @@ protected function selectProjectDirectory(): ?string
 
 ## Test Structure
 
-- A top-level `beforeEach` calls `Storage::fake('user_home')` and builds the fixed uuid and path
-  strings; a nested `beforeEach` inside a `describe` sets up the doubles for that action or listener.
+- A top-level `beforeEach` builds the fixed uuid and path strings (the `user_home` fake is already in
+  place, see Non-Negotiables); a nested `beforeEach` inside a `describe` sets up the doubles for that action or listener.
 - One `describe()` per action, listener, or public method; `it()` for cases.
 - Success case asserts state **and** interaction (`->once()->with(...)` on the mock, or a fake's spy array).
 - Fixture builders live at the bottom of the file with named arguments and a docblock.
@@ -332,7 +337,6 @@ protected function selectProjectDirectory(): ?string
 - Calling `livewire()` — the plugin is not installed; use `Livewire::test()`
 - Adding `Filament::setCurrentPanel()` — unnecessary, the default panel resolves
 - `->set()` on a `#[Locked]` property instead of mounting it or subclassing
-- Forgetting `Storage::fake('user_home')`
 - Forgetting `SettingsService::loadSettings` on a `Project` or `Settings` test, including its failure test
 - Expecting a page to throw instead of asserting `loadedInvalidMessage`
 - `TestAction::make(...)->table($record)` with a record array that has no `__key` — pass the index string

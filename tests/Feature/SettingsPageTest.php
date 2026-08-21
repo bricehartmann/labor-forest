@@ -12,14 +12,11 @@ use Filament\Notifications\Notification;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->terminalExample = 'open "{{ WORKSPACE_DIR }}" -a iterm';
     $this->ideExample = 'open "{{ WORKSPACE_DIR }}" -a phpstorm';
     $this->browserExample = 'open "{{ ENV_APP_URL }}"';

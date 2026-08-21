@@ -21,14 +21,11 @@ use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\HtmlString;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->uuid = '11111111-2222-3333-4444-555555555555';
     $this->projectPath = '/tmp/repo';
     $this->workspacePath = '/tmp/repo-feature';

@@ -7,6 +7,7 @@ use App\Data\WorkflowRunLogStepData;
 use App\Data\WorkflowRunLogSummaryData;
 use App\Data\WorkflowStepData;
 use App\Data\WorkspaceData;
+use App\Enums\Disk;
 use App\Enums\GitStatus;
 use App\Enums\WorkflowStatus;
 use App\Enums\WorkflowStepFailureReason;
@@ -16,6 +17,7 @@ use App\Enums\WorkspaceStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /*
@@ -44,6 +46,13 @@ pest()->extend(TestCase::class)
         // the GitHub releases API, so without this every dashboard test hits api.github.com for real.
         // A test's own Http::fake() merges on top of this.
         Http::fake([])->preventStrayRequests();
+
+        // Registration happens earlier than this, in Tests\TestCase::createApplication() — the panel
+        // provider reads the disk while the container bootstraps, long before any beforeEach. What is
+        // left for here is cleanup: that boot writes a defaults settings.yaml and projects.yaml into
+        // the shared root, and Storage::fake() empties the directory so no test inherits state from
+        // the one before it.
+        Storage::fake(Disk::USER_HOME->value);
     })
     ->in('Feature');
 

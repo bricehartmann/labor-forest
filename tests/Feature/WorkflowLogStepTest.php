@@ -6,13 +6,10 @@ use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Filament\Pages\WorkflowLog;
 use App\Livewire\WorkflowLogStep;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->uuid = '11111111-1111-1111-1111-111111111111';
     $this->slug = 'repo-feature';
 });

@@ -1,6 +1,6 @@
 ---
 name: service-testing
-description: "Use this skill whenever writing, editing, fixing, or reviewing a Pest feature test for a class in app/Services/ — GitService, ProjectsService, WorkflowService, SettingsService, LaunchService, VariableReplacementService, ProcessEnvironmentService. Trigger on any request to test a service, cover a service method, add failure cases for a service, fake or mock the git calls, avoid spawning shell commands in tests, fake the user_home disk, or stub the filesystem for a service. Also trigger when a service test fails with 'Disk [user_home] does not have a configured driver', with 'Attempted process [...] without a matching fake', with a BadMethodCallException from File::isFile during a spawned process, or when deciding where a test double should live. Covers: the ProcessSpy doubling pattern over Process::fake(), the one surviving LaunchService seam, container-bound collaborators, Storage::fake('user_home'), File facade stubbing, success plus failure coverage, and the no-preexisting-state rule. Do not use for Filament pages, Livewire components, jobs, or app/Data/ DTOs."
+description: "Use this skill whenever writing, editing, fixing, or reviewing a Pest feature test for a class in app/Services/ — GitService, ProjectsService, WorkflowService, SettingsService, LaunchService, VariableReplacementService, ProcessEnvironmentService. Trigger on any request to test a service, cover a service method, add failure cases for a service, fake or mock the git calls, avoid spawning shell commands in tests, reach the suite-wide user_home fake, or stub the filesystem for a service. Also trigger when a service test fails with 'Disk [extras] does not have a configured driver', with 'Attempted process [...] without a matching fake', with a BadMethodCallException from File::isFile during a spawned process, or when deciding where a test double should live. Covers: the ProcessSpy doubling pattern over Process::fake(), the one surviving LaunchService seam, container-bound collaborators, the suite-wide user_home fake, File facade stubbing, success plus failure coverage, and the no-preexisting-state rule. Do not use for Filament pages, Livewire components, jobs, or app/Data/ DTOs."
 license: MIT
 metadata:
   author: labor-forest
@@ -35,10 +35,16 @@ fixed absolute paths as *strings only* (`/tmp/repo`, `/tmp/repo-feature`) and do
 - **Database**: no service reads or writes a domain table. The only table is `jobs`, and it exists solely
   as the queue backend. Leave `RefreshDatabase` commented out in `tests/Pest.php`, and never assert
   against the database.
-- **Disk**: never touch the developer's real `~/.laborforest/`. `Storage::fake('user_home')` is mandatory
-  for any service using the `ManagesFiles` trait — that disk is registered at runtime by NativePHP and
-  **does not exist** in a test boot. Without the fake the test dies with
-  `Disk [user_home] does not have a configured driver.`
+- **Disk**: never touch the developer's real `~/.laborforest/`. `user_home` is registered at runtime by
+  NativePHP and does not exist in a test boot, so `Tests\TestCase::createApplication()` registers a fake
+  one *before the container bootstraps* — the Filament panel provider reads the disk while it registers,
+  earlier than any hook could fake it — and `tests/Pest.php` re-fakes the same root before every test to
+  empty it. So a service test needs no `Storage::fake('user_home')` of its own unless it wants the
+  handle: `$this->disk = Storage::fake('user_home')`, as `SettingsServiceTest` and `ProjectsServiceTest`
+  do. `extras` is not faked globally — fake it per file.
+- A file the test never wrote reads as **empty, not missing**: `SettingsService::loadSettings()` seeds a
+  defaults `settings.yaml` and returns defaults rather than throwing. To test a *failure* of one of these
+  services from another test, mock the service and throw; do not try to take the disk away.
 
 **4. Every public method needs both a success test and a failure test.** See the
 [per-service table](#per-service-seams) for what failure means in each case.
@@ -156,15 +162,16 @@ sequence spying comes free.
 
 > `AppPanelProvider::panel()` calls `ProjectsService::loadProjects()` and `SettingsService::loadSettings()`
 > at **boot** time, wrapped in `rescue()`. Anything bound inside a test body is too late to affect panel
-> navigation. Irrelevant to service tests; fatal to anyone who assumes otherwise.
+> navigation — that boot runs against the suite's empty `user_home` and reports nothing. To cover
+> `panel()` itself, invoke it directly over mocked services, as `AppPanelProviderTest` does.
 
 ## Per-Service Doubles
 
 | Service | What to double | Failure cases to cover |
 |---------|-----------------|------------------------|
 | `GitService` | `ProcessSpy::install()`; `FakeProcessEnvironmentService`; `File::shouldReceive('exists')` | `GitOperationFailed` for each operation label; `WorkspaceDirectoryExists`; `GitBranchDoesNotExist`; the bare `RuntimeException` when neither the branch exists nor a base branch is given |
-| `SettingsService` | `Storage::fake('user_home')` — no other seam | `InvalidSettingsFile::fromParseError` / `notAMapping` / `fromValidation`. A null or empty file yields defaults via the merge and does **not** throw — test that too |
-| `ProjectsService` | `Storage::fake('user_home')`; `ProcessSpy::install()` (the real `GitService` runs); `FakeProcessEnvironmentService`; `File` facade for absolute workspace paths | `InvalidProjectsFile` (including `withProblems`, which accumulates *every* bad entry rather than failing on the first); `ProjectNotFound`; `ProjectDirectoryNotFound` / `ProjectDirectoryExists` / `ProjectDirectoryNotGitRepository`; `GitStatusNotClean`; `WorkspaceNotFound`. Also cover the `rescue()`d paths that swallow git failures and fall back to defaults |
+| `SettingsService` | the globally faked `user_home` disk — no other seam | `InvalidSettingsFile::fromParseError` / `notAMapping` / `fromValidation`. A null or empty file yields defaults via the merge and does **not** throw — test that too |
+| `ProjectsService` | the globally faked `user_home` disk plus `Storage::fake('extras')`; `ProcessSpy::install()` (the real `GitService` runs); `FakeProcessEnvironmentService`; `File` facade for absolute workspace paths | `InvalidProjectsFile` (including `withProblems`, which accumulates *every* bad entry rather than failing on the first); `ProjectNotFound`; `ProjectDirectoryNotFound` / `ProjectDirectoryExists` / `ProjectDirectoryNotGitRepository`; `GitStatusNotClean`; `WorkspaceNotFound`. Also cover the `rescue()`d paths that swallow git failures and fall back to defaults |
 | `WorkflowService` | `Queue::fake()`; bind a fake `ProjectsService`; `File` facade under `.laborforest/` | `InvalidWorkflowFile` — a missing file also throws, since `Yaml::parseFile` raises `ParseException`; `WorkspaceNotFound` propagating out of `dispatchWorkflow`. Also the non-throwing skips: missing directory returns `collect()`, wrong `resource_type` filtered out, empty-step workflows rejected |
 | `VariableReplacementService` | `File::shouldReceive('isFile')` and `get()` for the workspace `.env` | `UnresolvedVariable::unknownVariable`; `::missingEnvironmentVariable` (thrown from inside the preg callback); `::replacementFailed` |
 | `LaunchService` | the `launchProcess()` seam above; `FakeProcessEnvironmentService`; bind a fake `SettingsService` | Silent early return on a null or empty command; `InvalidSettingsFile` and `UnresolvedVariable` propagating through |
@@ -242,7 +249,7 @@ it('throws before running git when the workspace directory already exists', func
   `start($command, $closure)->wait()` streams under a fake, which is why `RunWorkflow` uses it
 - Forgetting that `Process::result(output: '0')` yields `''` — `normalizeOutput()` short-circuits on
   `empty()`, and `empty('0')` is true
-- Forgetting `Storage::fake('user_home')` on a `ManagesFiles` service
+- Reaching for `Storage::fake('user_home')` to make a `ManagesFiles` service fail — the disk is always faked now; mock the service instead
 - Creating real temp directories instead of using path strings plus a doubled filesystem
 - Uncommenting `RefreshDatabase` in `tests/Pest.php`, or asserting against the database at all
 - Writing the test in `tests/Unit` and losing the container

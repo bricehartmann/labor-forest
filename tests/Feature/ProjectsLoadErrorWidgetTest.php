@@ -4,13 +4,10 @@ use App\Data\ProjectData;
 use App\Exceptions\InvalidProjectsFile;
 use App\Filament\Widgets\ProjectsLoadErrorWidget;
 use App\Services\ProjectsService;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->uuid = '11111111-1111-1111-1111-111111111111';
     $this->loadFailure = projectsLoadErrorWidgetFailure();
 });
