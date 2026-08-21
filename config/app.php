@@ -8,11 +8,15 @@ return [
     |--------------------------------------------------------------------------
     |
     | The GitHub API endpoint the dashboard checks for a newer release than the
-    | installed one. It answers with the newest published, non-prerelease tag.
+    | installed one. It is the release *list*, not /releases/latest, which 404s
+    | while every published release is a prerelease. GitHubService picks the
+    | newest stable out of it and falls back to the newest prerelease only when
+    | there is no stable one. 100 is the API's page size limit, so a stable
+    | release buried under more than 100 newer prereleases would be missed.
     |
     */
 
-    'latest_release_url' => 'https://api.github.com/repos/bricehartmann/labor-forest/releases/latest',
+    'latest_release_url' => 'https://api.github.com/repos/bricehartmann/labor-forest/releases?per_page=100',
 
     /*
     |--------------------------------------------------------------------------
