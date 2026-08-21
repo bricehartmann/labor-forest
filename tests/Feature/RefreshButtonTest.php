@@ -4,12 +4,7 @@ use App\Events\GlobalRefresh;
 use App\Livewire\RefreshButton;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
-
-beforeEach(function () {
-    Storage::fake('user_home');
-});
 
 describe('flushCache', function () {
     it('empties the cache', function () {

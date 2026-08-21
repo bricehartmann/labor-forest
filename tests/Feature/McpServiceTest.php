@@ -7,6 +7,7 @@ use App\Enums\McpEndpoint;
 use App\Enums\McpServerStatus;
 use App\Exceptions\McpServerNotEnabled;
 use App\Exceptions\McpServerNotStopped;
+use App\Exceptions\McpServerPortInUse;
 use App\Exceptions\McpServerUnhealthy;
 use App\Services\McpService;
 use App\Services\SettingsService;
@@ -30,10 +31,17 @@ beforeEach(function () {
     };
 
     $this->mcp = new McpService;
+
+    // startMcpServer() probes the port before it spawns anything, and tests/Pest.php refuses a stray
+    // request. A stub registered here would win over the per-test ones, since the first matching
+    // callback answers, so every test that gets as far as the spawn says for itself what it found.
+    $this->portIsFree = fn () => Http::fake(fn () => throw new ConnectionException('Connection refused'));
 });
 
 describe('startMcpServer', function () {
     it('serves the mcp routes from a persistent artisan process on the configured port', function () {
+        ($this->portIsFree)();
+
         ($this->writeSettings)(['mcp_enabled' => true, 'mcp_port' => 9876]);
 
         $this->mock(ChildProcessContract::class, function ($mock) {
@@ -61,6 +69,8 @@ describe('startMcpServer', function () {
     });
 
     it('names the php binary the application itself runs on, so a leaked one cannot win', function () {
+        ($this->portIsFree)();
+
         ($this->writeSettings)(['mcp_enabled' => true]);
 
         $this->mock(ChildProcessContract::class, function ($mock) {
@@ -74,6 +84,8 @@ describe('startMcpServer', function () {
     });
 
     it('passes --no-reload so the served process keeps the native environment', function () {
+        ($this->portIsFree)();
+
         ($this->writeSettings)(['mcp_enabled' => true]);
 
         $this->mock(ChildProcessContract::class, function ($mock) {
@@ -95,6 +107,61 @@ describe('startMcpServer', function () {
         });
 
         $this->mcp->startMcpServer();
+    });
+
+    it('refuses to spawn a server that could only fail to bind, and names the occupant', function () {
+        // the shape of the bug this guards: the app is quit, its `php -S` grandchild survives, and the
+        // persistent watchdog then respawns a child every couple of seconds for as long as it runs
+        ($this->writeSettings)(['mcp_enabled' => true, 'mcp_port' => 9876]);
+
+        Http::fake([McpEndpoint::LABORFOREST->url(9876) => Http::response(mcpInitializeReplyPayload())]);
+
+        $this->mock(ChildProcessContract::class, function ($mock) {
+            $mock->shouldReceive('get')->once()->with($this->alias)->andReturnNull();
+            $mock->shouldReceive('artisan')->never();
+        });
+
+        expect(fn () => (new ImpatientMcpService)->startMcpServer())
+            ->toThrow(McpServerPortInUse::class, 'this app did not start it');
+    });
+
+    it('reports what a foreign occupant answered, rather than calling it stale', function () {
+        ($this->writeSettings)(['mcp_enabled' => true, 'mcp_port' => 9876]);
+
+        Http::fake([McpEndpoint::LABORFOREST->url(9876) => Http::response('<html>Not MCP</html>')]);
+
+        $this->mock(ChildProcessContract::class, function ($mock) {
+            $mock->shouldReceive('get')->andReturnNull();
+            $mock->shouldReceive('artisan')->never();
+        });
+
+        expect(fn () => (new ImpatientMcpService)->startMcpServer())
+            ->toThrow(McpServerPortInUse::class, 'Another application is using that port');
+    });
+
+    it('starts the server anyway once a port that was busy has been let go', function () {
+        // stopMcpServer() only kills the `artisan serve` process, so its `php -S` worker can still be
+        // holding the socket for a moment after the runtime has deregistered the alias
+        ($this->writeSettings)(['mcp_enabled' => true, 'mcp_port' => 9876]);
+
+        $probes = 0;
+
+        Http::fake([McpEndpoint::LABORFOREST->url(9876) => function () use (&$probes) {
+            $probes++;
+
+            return $probes === 1
+                ? Http::response(mcpInitializeReplyPayload())
+                : throw new ConnectionException('Connection refused');
+        }]);
+
+        $this->mock(ChildProcessContract::class, function ($mock) {
+            $mock->shouldReceive('get')->andReturnNull();
+            $mock->shouldReceive('artisan')->once()->andReturnSelf();
+        });
+
+        (new ImpatientMcpService)->startMcpServer();
+
+        expect($probes)->toBe(2);
     });
 
     it('throws when mcp is disabled in the settings', function () {
@@ -131,6 +198,8 @@ describe('stopMcpServer', function () {
 
 describe('restartMcpServer', function () {
     it('stops the running server before starting one on the new port', function () {
+        ($this->portIsFree)();
+
         ($this->writeSettings)(['mcp_enabled' => true, 'mcp_port' => 9001]);
 
         $calls = [];
@@ -197,6 +266,8 @@ describe('restartMcpServer', function () {
 
 describe('mcp token', function () {
     it('writes a token on first start, since a settings file predating the server has none', function () {
+        ($this->portIsFree)();
+
         ($this->writeSettings)(['mcp_enabled' => true, 'mcp_token' => null]);
 
         $this->mock(ChildProcessContract::class, function ($mock) {
@@ -213,6 +284,8 @@ describe('mcp token', function () {
 
     it('leaves a token that already exists alone, so registered clients keep working', function () {
         $token = Str::random(SettingsData::MCP_TOKEN_LENGTH);
+
+        ($this->portIsFree)();
 
         ($this->writeSettings)(['mcp_enabled' => true, 'mcp_token' => $token]);
 

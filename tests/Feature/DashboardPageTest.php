@@ -4,14 +4,11 @@ use App\Filament\Pages\Dashboard;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\HtmlString;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     // AppVersionWidget renders with the dashboard and asks GitHub for the latest release. Answering
     // it here keeps the page under test off the network and out of its own failure path.
     Http::fake([config('app.latest_release_url') => Http::response([

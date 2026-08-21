@@ -21,12 +21,9 @@ use App\Services\WorkflowService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Storage;
 use Symfony\Component\Yaml\Yaml;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->workflows = new WorkflowService;
     $this->workspacePath = '/tmp/repo-feature';
     $this->logsPath = '/tmp/repo-feature/.laborforest/ignored/logs';

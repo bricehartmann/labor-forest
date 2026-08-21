@@ -25,8 +25,6 @@ use Tests\Fakes\ProcessSpy;
 use function Pest\Laravel\mock;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->uuid = '11111111-1111-1111-1111-111111111111';
     $this->workspacePath = '/tmp/repo-feature';
     $this->workflowPath = '/tmp/repo-feature/.laborforest/workflows/up.yaml';

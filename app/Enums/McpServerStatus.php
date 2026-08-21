@@ -7,6 +7,7 @@ use Filament\Support\Icons\Heroicon;
 enum McpServerStatus: string
 {
     case HEALTHY = 'healthy';
+    case STALE = 'stale';
     case UNREACHABLE = 'unreachable';
     case FORBIDDEN = 'forbidden';
     case FOREIGN = 'foreign';
@@ -20,6 +21,7 @@ enum McpServerStatus: string
     {
         return match ($this) {
             self::HEALTHY => Heroicon::CheckCircle,
+            self::STALE => Heroicon::ExclamationTriangle,
             self::UNREACHABLE => Heroicon::SignalSlash,
             self::FORBIDDEN => Heroicon::LockClosed,
             self::FOREIGN, self::APP_PORT => Heroicon::QuestionMarkCircle,
@@ -34,6 +36,7 @@ enum McpServerStatus: string
     {
         return match ($this) {
             self::HEALTHY => 'The MCP server answered',
+            self::STALE => 'A server this app did not start owns that port',
             self::UNREACHABLE => 'Nothing is listening',
             self::FORBIDDEN => 'The endpoint refused the request',
             self::FOREIGN => 'Something else is on that port',
@@ -54,6 +57,7 @@ enum McpServerStatus: string
     {
         return match ($this) {
             self::HEALTHY => "{$url} completed an MCP handshake.",
+            self::STALE => "{$url} completed an MCP handshake, but this app did not start it. A server left behind by a previous run holds that port; its requests fail once the app it belonged to is gone, and this app cannot bind. Quit it, or pick another port.",
             self::UNREACHABLE => "Nothing answered at {$url}. Either the server is not running, or it is running on a different port.",
             self::FORBIDDEN => "{$url} answered {$httpStatus}. The bearer token was rejected, NativePHP's browser guard is still in front of the route, or another application owns that port. An MCP client reports this as a request to authenticate.",
             self::FOREIGN => "{$url} answered, but not with an MCP handshake. Another application is using that port.",

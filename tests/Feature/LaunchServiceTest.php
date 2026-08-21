@@ -14,12 +14,9 @@ use App\Services\VariableReplacementService;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
-use Illuminate\Support\Facades\Storage;
 use Tests\Fakes\FakeProcessEnvironmentService;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->repo = '/tmp/repo';
     $this->worktree = '/tmp/repo-feature';
 

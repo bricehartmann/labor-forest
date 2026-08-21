@@ -3,13 +3,10 @@
 use App\Exceptions\InstallCliToolsFailed;
 use App\Filament\Widgets\InstallCliToolsWidget;
 use App\Services\CliToolsService;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->pickedPath = '/tmp/bin';
 });
 

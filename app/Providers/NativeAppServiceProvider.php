@@ -2,13 +2,18 @@
 
 namespace App\Providers;
 
+use App\Enums\QueryParameter;
 use App\Enums\WindowId;
+use App\Exceptions\McpServerPortInUse;
+use App\Filament\Pages\Dashboard;
 use App\Services\CliToolsService;
 use App\Services\McpService;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
 use Native\Desktop\Contracts\ProvidesPhpIni;
 use Native\Desktop\Facades\Window;
+use Native\Desktop\Windows\Window as NativeWindow;
+use Throwable;
 
 class NativeAppServiceProvider implements ProvidesPhpIni
 {
@@ -46,8 +51,15 @@ class NativeAppServiceProvider implements ProvidesPhpIni
          */
         $mcpEnabled = rescue(fn () => $settingsService->loadSettings()->mcp_enabled, false);
 
+        $mcpFailure = null;
+
         if ($mcpEnabled) {
-            rescue(fn () => app(McpService::class)->startMcpServer());
+            rescue(
+                fn () => app(McpService::class)->startMcpServer(),
+                function (Throwable $throwable) use (&$mcpFailure): void {
+                    $mcpFailure = $throwable;
+                },
+            );
         }
 
         /**
@@ -58,12 +70,48 @@ class NativeAppServiceProvider implements ProvidesPhpIni
          */
         $target = rescue(fn (): ?string => app(CliToolsService::class)->runPendingCommand());
 
+        /**
+         * A CLI request is what the user asked for by name, so it keeps the window. Only when there
+         * is none does an occupied MCP port get to choose the landing page: the alternative is an
+         * app whose MCP server is silently dead, which the user next meets as a failing client.
+         */
+        $target ??= $this->mcpFailureUrl($mcpFailure);
+
         $window = Window::open(WindowId::MAIN->value)
             ->maximized();
 
         if ($target !== null) {
-            $window->url($target);
+            $this->navigateTo($window, $target);
         }
+    }
+
+    /**
+     * Show the freshly opened window on the given page.
+     *
+     * Overridden in tests, which have no Electron runtime for the window to report the change to.
+     */
+    protected function navigateTo(NativeWindow $window, string $url): void
+    {
+        $window->url($url);
+    }
+
+    /**
+     * The dashboard, carrying the reason the MCP server did not start, or null when it did.
+     *
+     * Only a port that is already answering is reported. It is the one failure the user has to act
+     * on themselves — every other way a start can fail is either transient or already visible on the
+     * settings screen — and the message names the occupant the probe found.
+     */
+    protected function mcpFailureUrl(?Throwable $failure): ?string
+    {
+        if (! $failure instanceof McpServerPortInUse) {
+            return null;
+        }
+
+        return rescue(fn (): string => Dashboard::getUrl([
+            QueryParameter::ERROR->value => 'The MCP server could not be started',
+            QueryParameter::BODY->value => $failure->getMessage(),
+        ]));
     }
 
     /**

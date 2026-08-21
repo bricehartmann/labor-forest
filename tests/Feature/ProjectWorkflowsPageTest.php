@@ -11,14 +11,11 @@ use App\Services\ProjectsService;
 use App\Services\WorkflowService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 use Native\Desktop\Facades\System;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     $this->uuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     $this->projectPath = '/tmp/repo';
     $this->workspacePath = '/tmp/repo-feature';

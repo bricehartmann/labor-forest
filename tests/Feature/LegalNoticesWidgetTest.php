@@ -2,13 +2,8 @@
 
 use App\Filament\Widgets\InstallCliToolsWidget;
 use App\Filament\Widgets\LegalNoticesWidget;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\Fakes\ProcessSpy;
-
-beforeEach(function () {
-    Storage::fake('user_home');
-});
 
 describe('render', function () {
     it('renders the copyright notice', function () {

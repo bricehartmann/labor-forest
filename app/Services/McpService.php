@@ -11,6 +11,7 @@ use App\Enums\McpServerStatus;
 use App\Exceptions\InvalidSettingsFile;
 use App\Exceptions\McpServerNotEnabled;
 use App\Exceptions\McpServerNotStopped;
+use App\Exceptions\McpServerPortInUse;
 use App\Exceptions\McpServerUnhealthy;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
@@ -50,6 +51,16 @@ class McpService
     protected const int HEALTH_CONNECT_TIMEOUT_SECONDS = 1;
 
     /**
+     * Number of times an occupied port is probed before the start is abandoned.
+     *
+     * More than one, because stopMcpServer() only asks the runtime to kill the `artisan serve`
+     * process, and the `php -S` worker it spawned can still be holding the socket when the alias is
+     * already deregistered — a restart on the same port would otherwise report the server it just
+     * stopped as an occupant.
+     */
+    protected const int PORT_POLL_ATTEMPTS = 5;
+
+    /**
      * The memoized answer of isReadOnly().
      */
     protected ?bool $readOnly = null;
@@ -58,6 +69,7 @@ class McpService
      * Start the MCP server, unless it is already running.
      *
      * @throws McpServerNotEnabled when MCP is switched off in the settings
+     * @throws McpServerPortInUse when something is already answering on the configured port
      * @throws InvalidSettingsFile
      */
     public function startMcpServer(): void
@@ -71,6 +83,8 @@ class McpService
         if (ChildProcess::get(ChildProcessAlias::MCP_SERVER->value)) {
             return;
         }
+
+        $this->ensureMcpPortIsFree($settings->mcp_port);
 
         if (blank($settings->mcp_token)) {
             $this->regenerateMcpToken();
@@ -231,6 +245,7 @@ class McpService
      *
      * @throws McpServerNotEnabled when MCP is switched off in the settings
      * @throws McpServerNotStopped when the running server does not exit
+     * @throws McpServerPortInUse when something is already answering on the configured port
      * @throws InvalidSettingsFile
      */
     public function restartMcpServer(): void
@@ -238,6 +253,60 @@ class McpService
         $this->stopMcpServer();
         $this->awaitStoppedMcpServer();
         $this->startMcpServer();
+    }
+
+    /**
+     * Refuse to start a server on a port that is already answering.
+     *
+     * A `persistent` child that cannot bind is restarted by the runtime for as long as the app runs,
+     * so without this an occupied port costs a spawn every couple of seconds, each one writing
+     * `Address already in use` to a log file that outlives the launch. Beyond the short poll below,
+     * nothing about the situation improves by trying again, and the port's occupant is what the user
+     * needs told.
+     *
+     * A server left behind by a previous run is the case worth naming: it completes a handshake, so
+     * the probe reads it as HEALTHY, while every real request to it fails once the native runtime
+     * that owned it is gone. Since no child is registered under our alias at this point, a handshake
+     * can only be coming from a server this app did not start.
+     *
+     * @throws McpServerPortInUse when something answers on the port
+     * @throws InvalidSettingsFile
+     */
+    protected function ensureMcpPortIsFree(int $port): void
+    {
+        $occupant = null;
+
+        for ($attempt = 0; $attempt < static::PORT_POLL_ATTEMPTS; $attempt++) {
+            if ($attempt > 0) {
+                usleep(static::STOP_POLL_INTERVAL_MS * 1000);
+            }
+
+            $occupant = $this->probeMcpPortOccupant($port);
+
+            if ($occupant === null) {
+                return;
+            }
+        }
+
+        throw $occupant;
+    }
+
+    /**
+     * What is answering on the given port, or null when nothing is.
+     *
+     * @throws InvalidSettingsFile
+     */
+    protected function probeMcpPortOccupant(int $port): ?McpServerPortInUse
+    {
+        try {
+            $health = $this->checkMcpServer($port);
+        } catch (McpServerUnhealthy $exception) {
+            return $exception->status === McpServerStatus::UNREACHABLE
+                ? null
+                : new McpServerPortInUse($exception->status, $exception->url, $exception->httpStatus);
+        }
+
+        return new McpServerPortInUse(McpServerStatus::STALE, $health->url);
     }
 
     /**

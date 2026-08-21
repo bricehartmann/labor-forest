@@ -5,14 +5,11 @@ use App\Exceptions\GitHubReleasesNotFound;
 use App\Filament\Widgets\AppVersionWidget;
 use App\Services\GitHubService;
 use Illuminate\Support\Facades\Exceptions;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 use Tests\Fakes\ProcessSpy;
 
 beforeEach(function () {
-    Storage::fake('user_home');
-
     // mount() always asks for the latest release, so every test has to answer — the widget swallows
     // the failure, and an unmocked service would quietly exercise the failure path instead.
     appVersionGitHubService(appVersionReleaseData());
