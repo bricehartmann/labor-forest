@@ -21,6 +21,44 @@ If you have questions, you can [open an issue](https://github.com/bricehartmann/
 
 Pull requests are welcome! Contributions are accepted under the GPL-3.0-or-later license.
 
+## Feature overview
+- Manage "Projects" (local repositories)
+    - choose to commit or ignore the configuration directory
+- Manage "Workspaces" (a specific branch in a worktree)
+    - create Workspaces for new or existing branches
+    - track a Workspace's status, showing whether a Workspace is `ready` for work or `suspended` (dev environment not running)
+    - quickly launch your configured Terminal, IDE, or Browser for a Workspace
+    - easily remove a Workspace and clean up the worktree and branch
+- Run local Workflows to spin up, tear down, or modify local development environments, per Workspace
+    - write Workflows in a style inspired by GitHub Actions (that run locally)
+    - use template variables specific to the Project, Workspace, or a value in your `.env` file
+    - conditionally run or skip steps based on the outcome of a shell command
+    - run nested Workflows
+    - validate or launch Workflows from a terminal
+- Review Workflow output logs in the application
+    - watch output appear in realtime
+    - review historical logs
+    - diagnose Workflow failures
+    - bulk delete old log files
+
+### Local MCP server
+
+- Use your favorite agentic coding tool to control LaborForest
+- Configure the local MCP server as read-only or writeable
+- Manage Projects and Workflows
+- Write, run, validate, and diagnose Workflows
+- Update configured settings
+
+### Example workflows included
+
+- Kickstart your project with example Workflows
+    - Laravel (Herd, MinIO, Redis)
+    - JavaScript
+    - Bare (starting point)
+
+### System requirements:
+- macOS (arm64 or x64)
+
 ## Tech stack
 - NativePHP + Laravel
 - Livewire
