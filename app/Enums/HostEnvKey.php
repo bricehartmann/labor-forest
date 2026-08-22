@@ -52,6 +52,12 @@ enum HostEnvKey: string
     case MCP_SERVER = 'LABORFOREST_MCP_SERVER';
 
     /**
+     * The verbosity Symfony Console exports from the process running a workflow step, which would
+     * otherwise silence any Console command the step spawns and empty a captured output.
+     */
+    case SHELL_VERBOSITY = 'SHELL_VERBOSITY';
+
+    /**
      * The toolchain this application was launched with, which a workspace must resolve for itself.
      */
     case PHP_BINARY = 'PHP_BINARY';

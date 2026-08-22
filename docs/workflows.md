@@ -101,6 +101,8 @@ An unrecognized variable makes the whole Workflow file invalid. A well-formed `E
 
 LaborForest strips its own environment from the processes it spawns, so a workflow step does not inherit LaborForest's configuration. Variables such as `PATH`, `HOME`, `USER`, `SHELL`, and `LANG` are preserved. If your step needs a variable whose name also exists in LaborForest's own environment, set it explicitly with `env` or read it with `{{ ENV_* }}`.
 
+The verbosity of the process that runs a step is stripped along with the rest. A workflow step is spawned from LaborForest's queue worker, which is a Symfony Console process, and Console exports its verbosity as `SHELL_VERBOSITY` to every child process it starts. Left in place, a quiet worker silences any `artisan` or other Console command a step runs, so a capture such as `USER_ID=$(php artisan tinker --execute="echo DB::table('users')->max('id')")` would succeed with an empty value instead of failing. Steps therefore run at the default verbosity, and a step that wants another one sets `SHELL_VERBOSITY` in its own `env`.
+
 ### Types of Steps
 
 There are three types of steps. `shell` runs a shell command, `update_env` updates values in the Workspace's `.env` file, and `workflow` runs a nested Workflow.
