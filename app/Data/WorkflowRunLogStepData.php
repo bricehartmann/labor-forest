@@ -8,7 +8,6 @@ use App\Enums\WorkflowStepStatus;
 use App\Enums\WorkflowStepType;
 use App\Rules\ValidVariables;
 use Filament\Support\Icons\Heroicon;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\HtmlString;
 use SensioLabs\AnsiConverter\AnsiToHtmlConverter;
 use Spatie\LaravelData\Attributes\WithCast;
@@ -68,6 +67,14 @@ class WorkflowRunLogStepData extends Data
     public function isPending(): bool
     {
         return $this->status() === WorkflowStepStatus::PENDING;
+    }
+
+    /**
+     * Whether this step has started and has not yet reached an outcome.
+     */
+    public function isRunning(): bool
+    {
+        return $this->status() === WorkflowStepStatus::RUNNING;
     }
 
     public static function rules(): array
@@ -145,17 +152,42 @@ class WorkflowRunLogStepData extends Data
         };
     }
 
+    /**
+     * How long this step has run, measured to now while it is still running.
+     */
     public function time(): ?string
     {
         if (! $this->started_timestamp) {
             return null;
         }
 
-        if (! $this->ended_timestamp) {
-            return Carbon::createFromTimestampUTC($this->started_timestamp)->shortAbsoluteDiffForHumans();
+        return self::formatDuration(($this->ended_timestamp ?? now()->timestamp) - $this->started_timestamp);
+    }
+
+    /**
+     * Format a duration as `7s`, `1m 23s` or `1h 2m 45s`, keeping the seconds
+     * in every case so a running step's counter visibly ticks.
+     */
+    private static function formatDuration(int $seconds): string
+    {
+        $seconds = max(0, $seconds);
+
+        $hours = intdiv($seconds, 3600);
+        $minutes = intdiv($seconds % 3600, 60);
+
+        $parts = [];
+
+        if ($hours > 0) {
+            $parts[] = $hours.'h';
         }
 
-        return Carbon::createFromTimestampUTC($this->ended_timestamp)->shortAbsoluteDiffForHumans(Carbon::createFromTimestampUTC($this->started_timestamp));
+        if ($hours > 0 || $minutes > 0) {
+            $parts[] = $minutes.'m';
+        }
+
+        $parts[] = ($seconds % 60).'s';
+
+        return implode(' ', $parts);
     }
 
     /**
