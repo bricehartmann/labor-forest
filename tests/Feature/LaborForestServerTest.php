@@ -434,6 +434,8 @@ describe('prompts', function () {
             // the check that has no consequences, as against starting a run
             ->assertSee('validate-workflow')
             ->assertSee('Do not run the workflow to test it.')
+            // the primary directory is a workspace too, so worktree-only steps are gated
+            ->assertSee('test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"')
             // the trailing slash is trimmed, as everywhere else a path is taken
             ->assertSee('/tmp/repo-feature/.laborforest/workflows')
             ->assertDontSee('/tmp/repo-feature//.laborforest');

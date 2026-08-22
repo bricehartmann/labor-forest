@@ -65,6 +65,11 @@ class AuthorWorkflowPrompt extends Prompt
           step that removes something with `if`, so re-running the workflow is not an error.
         - Put anything specific to this one workspace — a database name, a URL, a bucket — into an
           `update_env` step written from `{{ }}` variables, rather than hard-coding it into commands.
+        - The Project's primary directory is a Workspace too, and runs these same workflows. Gate any
+          step that only makes sense in a worktree — copying `.env` in from the primary directory,
+          rewriting `.env` keys to workspace-specific values — with
+          `if: 'test "{{ WORKSPACE_DIR }}" != "{{ PROJECT_PRIMARY_DIR }}"'`, so the workflow is still
+          safe to run in the primary directory.
         - `require_status` and `ending_status` are what make a workspace lifecycle reversible. A
           workflow that sets a workspace up should require `suspended` and end `ready`; one that tears
           it down should require `ready` and end `suspended`; one that is merely operational should
