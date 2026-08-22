@@ -8,9 +8,9 @@
                 </div>
                 <div>
                     @if($this->stepData->isRunning())
-                        {{-- A running step broadcasts nothing between its start and its finish,
-                             so the elapsed time ticks client-side. Mirrors the format of
-                             WorkflowRunLogStepData::formatDuration(). --}}
+                        {{-- A step re-renders only when it broadcasts output, so a silent step would
+                             show a frozen time. The elapsed time ticks client-side instead,
+                             mirroring the format of WorkflowRunLogStepData::formatDuration(). --}}
                         <span
                             x-data="{
                                 started: {{ $this->stepData->started_timestamp }},
