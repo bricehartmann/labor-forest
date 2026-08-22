@@ -39,6 +39,7 @@ describe('sanitized', function () {
         'packages cache path' => ['APP_PACKAGES_CACHE'],
         'routes cache path' => ['APP_ROUTES_CACHE'],
         'events cache path' => ['APP_EVENTS_CACHE'],
+        'console verbosity' => ['SHELL_VERBOSITY'],
         'php binary' => ['PHP_BINARY'],
         'composer binary' => ['COMPOSER_BINARY'],
     ]);

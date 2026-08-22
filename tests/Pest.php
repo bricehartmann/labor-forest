@@ -251,6 +251,8 @@ function componentRunLogStepData(
     ?WorkflowStepFailureReason $failureReason = null,
     ?string $run = 'composer install',
     ?string $logId = null,
+    ?int $startedTimestamp = null,
+    ?int $endedTimestamp = null,
 ): WorkflowRunLogStepData {
     return new WorkflowRunLogStepData(
         name: $name,
@@ -260,6 +262,8 @@ function componentRunLogStepData(
         skip_reason: $skipReason,
         failure_reason: $failureReason,
         run: $run,
+        started_timestamp: $startedTimestamp,
+        ended_timestamp: $endedTimestamp,
         hash: $hash,
         log_id: $logId,
     );

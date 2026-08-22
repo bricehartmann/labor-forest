@@ -6,6 +6,7 @@ use App\Enums\WorkflowStepSkipReason;
 use App\Enums\WorkflowStepType;
 use App\Filament\Pages\WorkflowLog;
 use App\Livewire\WorkflowLogStep;
+use Illuminate\Support\Carbon;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
@@ -252,6 +253,104 @@ describe('the locked route context', function () {
             ->toThrow(CannotUpdateLockedPropertyException::class)
             ->and(fn () => $component->set('slug', 'tampered'))
             ->toThrow(CannotUpdateLockedPropertyException::class);
+    });
+});
+
+describe('rendering the elapsed time', function () {
+    beforeEach(function () {
+        $this->now = Carbon::parse('2024-01-01 12:00:00');
+
+        $this->travelTo($this->now);
+    });
+
+    it('ticks the elapsed time client-side while the step is still running', function () {
+        $started = $this->now->timestamp - 83;
+
+        Livewire::test(WorkflowLogStep::class, [
+            'step' => workflowLogStepArray(componentRunLogStepData(
+                exitCode: null,
+                output: '',
+                startedTimestamp: $started,
+            )),
+            'uuid' => $this->uuid,
+            'slug' => $this->slug,
+        ])
+            ->assertOk()
+            ->assertSee('text-warning-500')
+            ->assertSeeHtml('x-text="elapsed"')
+            ->assertSeeHtml('started: '.$started)
+            ->assertSee('1m 23s');
+    });
+
+    it('renders a finished step as a static duration with no ticker', function () {
+        Livewire::test(WorkflowLogStep::class, [
+            'step' => workflowLogStepArray(componentRunLogStepData(
+                startedTimestamp: $this->now->timestamp - 3800,
+                endedTimestamp: $this->now->timestamp - 35,
+            )),
+            'uuid' => $this->uuid,
+            'slug' => $this->slug,
+        ])
+            ->assertOk()
+            ->assertSee('1h 2m 45s')
+            ->assertDontSeeHtml('x-text="elapsed"');
+    });
+
+    it('renders neither a duration nor a ticker for a step that never started', function () {
+        Livewire::test(WorkflowLogStep::class, [
+            'step' => workflowLogStepArray(componentRunLogStepData(
+                exitCode: null,
+                output: '',
+            )),
+            'uuid' => $this->uuid,
+            'slug' => $this->slug,
+        ])
+            ->assertOk()
+            ->assertDontSeeHtml('x-text="elapsed"')
+            ->assertDontSee('0s');
+    });
+});
+
+describe('the elapsed time of a run log step', function () {
+    beforeEach(function () {
+        $this->now = Carbon::parse('2024-01-01 12:00:00');
+
+        $this->travelTo($this->now);
+    });
+
+    it('has no time before the step has started', function () {
+        $step = componentRunLogStepData(exitCode: null, output: '');
+
+        expect($step->time())->toBeNull()
+            ->and($step->isRunning())->toBeFalse();
+    });
+
+    it('measures a running step against now', function ($secondsAgo, $expected) {
+        $step = componentRunLogStepData(
+            exitCode: null,
+            output: '',
+            startedTimestamp: $this->now->timestamp - $secondsAgo,
+        );
+
+        expect($step->isRunning())->toBeTrue()
+            ->and($step->time())->toBe($expected);
+    })->with([
+        'just started' => [0, '0s'],
+        'seconds' => [7, '7s'],
+        'exactly a minute' => [60, '1m 0s'],
+        'minutes and seconds' => [83, '1m 23s'],
+        'exactly an hour' => [3600, '1h 0m 0s'],
+        'hours, minutes and seconds' => [3765, '1h 2m 45s'],
+    ]);
+
+    it('measures a finished step from its start to its end', function () {
+        $step = componentRunLogStepData(
+            startedTimestamp: $this->now->timestamp - 3800,
+            endedTimestamp: $this->now->timestamp - 35,
+        );
+
+        expect($step->isRunning())->toBeFalse()
+            ->and($step->time())->toBe('1h 2m 45s');
     });
 });
 

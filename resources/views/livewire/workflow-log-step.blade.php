@@ -7,7 +7,40 @@
                     {{ $this->stepData->name }}
                 </div>
                 <div>
-                    {{ $this->stepData->time() }}
+                    @if($this->stepData->isRunning())
+                        {{-- A step re-renders only when it broadcasts output, so a silent step would
+                             show a frozen time. The elapsed time ticks client-side instead,
+                             mirroring the format of WorkflowRunLogStepData::formatDuration(). --}}
+                        <span
+                            x-data="{
+                                started: {{ $this->stepData->started_timestamp }},
+                                elapsed: '',
+                                interval: null,
+                                tick() {
+                                    const total = Math.max(0, Math.floor(Date.now() / 1000) - this.started);
+                                    const hours = Math.floor(total / 3600);
+                                    const minutes = Math.floor((total % 3600) / 60);
+                                    const parts = [];
+
+                                    if (hours) parts.push(`${hours}h`);
+                                    if (hours || minutes) parts.push(`${minutes}m`);
+                                    parts.push(`${total % 60}s`);
+
+                                    this.elapsed = parts.join(' ');
+                                },
+                                init() {
+                                    this.tick();
+                                    this.interval = setInterval(() => this.tick(), 1000);
+                                },
+                                destroy() {
+                                    clearInterval(this.interval);
+                                },
+                            }"
+                            x-text="elapsed"
+                        >{{ $this->stepData->time() }}</span>
+                    @else
+                        {{ $this->stepData->time() }}
+                    @endif
                 </div>
             </div>
         </x-filament::section.heading>
