@@ -732,7 +732,7 @@ class Project extends Page implements HasActions, HasSchemas, HasTable
                             );
                         }),
                     Action::make('remove')
-                        ->hidden(fn ($record) => $record['is_primary'] || $record['status'] === WorkspaceStatus::READY->value || $record['status'] === WorkspaceStatus::WORKING->value || $record['status'] === WorkspaceStatus::PENDING->value)
+                        ->hidden(fn ($record) => $record['is_primary'] || ! WorkspaceStatus::from($record['status'])->allowsRemoval())
                         ->label('Remove')
                         ->icon(Heroicon::Trash)
                         ->modal()

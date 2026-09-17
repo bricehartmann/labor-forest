@@ -66,6 +66,22 @@ enum WorkspaceStatus: string implements HasColor, HasLabel
     }
 
     /**
+     * Whether a workspace holding this status may be removed.
+     *
+     * `pending` and `working` belong to a run in flight, which is executing in the very directory
+     * the removal would delete, and `ready` is a workspace set up and in use. The rest are at rest
+     * and finished with: a `suspended` workspace has been torn down, and `error` and `unknown` are
+     * states the user clears rather than works in.
+     */
+    public function allowsRemoval(): bool
+    {
+        return match ($this) {
+            self::SUSPENDED, self::ERROR, self::UNKNOWN => true,
+            default => false,
+        };
+    }
+
+    /**
      * Whether a workflow declaring the given require_status may be launched by hand from this status.
      */
     public function allowsWorkflowRequiring(?WorkspaceStatus $requiredStatus): bool

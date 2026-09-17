@@ -43,6 +43,7 @@ use App\Mcp\Tools\LaunchTerminalTool;
 use App\Mcp\Tools\OverrideWorkspaceStatusTool;
 use App\Mcp\Tools\PurgeWorkflowLogsTool;
 use App\Mcp\Tools\RemoveProjectTool;
+use App\Mcp\Tools\RemoveWorkspaceTool;
 use App\Mcp\Tools\RunWorkflowTool;
 use App\Mcp\Tools\UpdateProjectLaunchCommandsTool;
 use App\Mcp\Tools\UpdateSettingsTool;
@@ -103,6 +104,8 @@ it('tells connecting clients what the server is for and what it will not do', fu
         ->toContain('queues the run and returns immediately')
         // the statuses the run gate turns on
         ->toContain('Only `ready` and `suspended` may run anything at all')
+        // the removal gate, which the tool schema gives a client no way to infer
+        ->toContain('Only a Workspace at rest may be removed')
         // nothing else warns that a tool call runs the user's shell unprompted
         ->toContain('nothing else here asks the user to confirm a tool call.')
         // the answer a parked call gets, which reads like neither a success nor a failure
@@ -539,6 +542,7 @@ describe('tools', function () {
                 'add-project',
                 'remove-project',
                 'add-workspace',
+                'remove-workspace',
                 'add-workspace-example-workflows',
                 'validate-workflow',
                 'run-workflow',
@@ -576,6 +580,7 @@ describe('tools', function () {
                 'add-project',
                 'remove-project',
                 'add-workspace',
+                'remove-workspace',
                 'add-workspace-example-workflows',
                 'validate-workflow',
                 'override-workspace-status',
@@ -594,7 +599,7 @@ describe('tools', function () {
 
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
-        expect($context->tools())->toHaveCount(14);
+        expect($context->tools())->toHaveCount(15);
     });
 
     it('withholds the tools that spawn a command in read-only mode whatever the shell policy says', function () {
@@ -643,6 +648,14 @@ describe('tools', function () {
         $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
 
         $annotations = $context->tools()->first(fn (Tool $tool) => $tool->name() === 'run-workflow')->annotations();
+
+        expect($annotations['destructiveHint'] ?? null)->toBeTrue();
+    });
+
+    it('marks removing a workspace destructive, because the directory and the branch both go', function () {
+        $context = (new LaborForestServer($this->mock(Transport::class)))->createContext();
+
+        $annotations = $context->tools()->first(fn (Tool $tool) => $tool->name() === 'remove-workspace')->annotations();
 
         expect($annotations['destructiveHint'] ?? null)->toBeTrue();
     });
@@ -1845,7 +1858,226 @@ describe('tools', function () {
 
         Event::assertNotDispatched(GlobalRefresh::class);
     });
+
+    it('removes the worktree of the workspace at the path', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved(WorkspaceStatus::SUSPENDED);
+
+        $this->mock(GitService::class)
+            ->shouldReceive('removeWorktree')->once()
+            ->with('/tmp/repo', '/tmp/repo-feature', 'feature', false, false, false);
+
+        // The trailing slash is trimmed before the workspace is looked up
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo-feature/',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('passes each removal flag through to git', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved(WorkspaceStatus::ERROR);
+
+        $this->mock(GitService::class)
+            ->shouldReceive('removeWorktree')->once()
+            ->with('/tmp/repo', '/tmp/repo-feature', 'feature', true, true, true);
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo-feature',
+            'force_delete_worktree' => true,
+            'delete_branch' => true,
+            'force_delete_branch' => true,
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses to remove the primary workspace, which is the project itself', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/repo')
+                ->andReturn(componentWorkspaceData('/tmp/repo', isPrimary: true, branch: 'main', status: WorkspaceStatus::SUSPENDED));
+            $mock->shouldReceive('loadProjectFromWorkspace')->once()->with('/tmp/repo')
+                ->andReturn(componentProjectData('11111111-1111-1111-1111-111111111111', '/tmp/repo'));
+        });
+
+        $this->mock(GitService::class)->shouldNotReceive('removeWorktree');
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertHasErrors([
+            "Workspace at path '/tmp/repo' is the project's primary workspace and cannot be removed.",
+        ]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses to remove a workspace whose run is still in flight', function (WorkspaceStatus $status) {
+        Event::fake([GlobalRefresh::class]);
+
+        // the run is executing in the very directory the removal would delete
+        mcpWorkspaceIsResolved($status);
+
+        $this->mock(GitService::class)->shouldNotReceive('removeWorktree');
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo-feature',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertHasErrors([
+            "Workspace at path '/tmp/repo-feature' is '{$status->value}' and has a workflow run in flight. Remove it once the run has finished.",
+        ]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    })->with('in flight statuses');
+
+    it('refuses to remove a ready workspace, and names the tool that suspends it', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        // the same statuses the Remove action on the Project screen offers itself for
+        mcpWorkspaceIsResolved(WorkspaceStatus::READY);
+
+        $this->mock(GitService::class)->shouldNotReceive('removeWorktree');
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo-feature',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertHasErrors([
+            "Workspace at path '/tmp/repo-feature' is 'ready' and cannot be removed. Call override-workspace-status to set it to 'suspended' first.",
+        ]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('removes a workspace in any status the Project screen offers the action for', function (WorkspaceStatus $status) {
+        Event::fake([GlobalRefresh::class]);
+
+        mcpWorkspaceIsResolved($status);
+
+        $this->mock(GitService::class)->shouldReceive('removeWorktree')->once();
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo-feature',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertOk()->assertSee('success');
+
+        Event::assertDispatched(GlobalRefresh::class);
+    })->with('removable statuses');
+
+    it('refuses a forced branch delete that does not also delete the branch', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        // git ignores the force flag on its own, so the call would answer success with the branch
+        // still there — a refusal is the only answer that is not a lie
+        $this->mock(ProjectsService::class)->shouldNotReceive('loadProjectWorkspace');
+        $this->mock(GitService::class)->shouldNotReceive('removeWorktree');
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo-feature',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => true,
+        ])->assertHasErrors(['force_delete_branch requires delete_branch to be true.']);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('refuses a call that leaves a removal flag unstated', function (string $missing, string $message) {
+        Event::fake([GlobalRefresh::class]);
+
+        // an omitted flag is not a false one: read as false it would quietly widen or narrow the
+        // removal the agent asked for, and an omitted delete_branch would take a forced branch
+        // delete with it, which git then drops without a word
+        $this->mock(ProjectsService::class)->shouldNotReceive('loadProjectWorkspace');
+        $this->mock(GitService::class)->shouldNotReceive('removeWorktree');
+
+        $arguments = array_diff_key([
+            'path' => '/tmp/repo-feature',
+            'force_delete_worktree' => true,
+            'delete_branch' => true,
+            'force_delete_branch' => true,
+        ], [$missing => null]);
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, $arguments)->assertHasErrors([$message]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    })->with([
+        'force_delete_worktree' => ['force_delete_worktree', 'The force delete worktree field is required.'],
+        'delete_branch' => ['delete_branch', 'The delete branch field is required.'],
+        'force_delete_branch' => ['force_delete_branch', 'The force delete branch field is required.'],
+    ]);
+
+    it('refuses to remove a workspace naming no path', function () {
+        $this->mock(ProjectsService::class)->shouldNotReceive('loadProjectWorkspace');
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertHasErrors(['The path field is required.']);
+    });
+
+    it('reports a workspace it cannot remove', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        $this->mock(ProjectsService::class)
+            ->shouldReceive('loadProjectWorkspace')->once()->with('/tmp/nope')
+            ->andThrow(new WorkspaceNotFound('/tmp/nope'));
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/nope',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertHasErrors([(new WorkspaceNotFound('/tmp/nope'))->getMessage()]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
+
+    it('reports a worktree git refuses to remove, which is how a dirty one is reported', function () {
+        Event::fake([GlobalRefresh::class]);
+
+        // git owns the dirtiness rule, so its own refusal is what reaches the agent — along with
+        // the force_delete_worktree flag the schema already told it about
+        mcpWorkspaceIsResolved(WorkspaceStatus::SUSPENDED);
+
+        $this->mock(GitService::class)
+            ->shouldReceive('removeWorktree')->once()
+            ->andThrow(new GitOperationFailed('remove worktree', 'contains modified or untracked files'));
+
+        LaborForestServer::tool(RemoveWorkspaceTool::class, [
+            'path' => '/tmp/repo-feature',
+            'force_delete_worktree' => false,
+            'delete_branch' => false,
+            'force_delete_branch' => false,
+        ])->assertHasErrors([
+            (new GitOperationFailed('remove worktree', 'contains modified or untracked files'))->getMessage(),
+        ]);
+
+        Event::assertNotDispatched(GlobalRefresh::class);
+    });
 });
+
+dataset('removable statuses', [
+    'suspended' => [WorkspaceStatus::SUSPENDED],
+    'error' => [WorkspaceStatus::ERROR],
+    'unknown' => [WorkspaceStatus::UNKNOWN],
+]);
 
 dataset('overridable statuses', [
     'ready' => [WorkspaceStatus::READY],

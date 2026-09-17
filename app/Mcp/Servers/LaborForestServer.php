@@ -21,6 +21,7 @@ use App\Mcp\Tools\LaunchTerminalTool;
 use App\Mcp\Tools\OverrideWorkspaceStatusTool;
 use App\Mcp\Tools\PurgeWorkflowLogsTool;
 use App\Mcp\Tools\RemoveProjectTool;
+use App\Mcp\Tools\RemoveWorkspaceTool;
 use App\Mcp\Tools\RunWorkflowTool;
 use App\Mcp\Tools\UpdateProjectLaunchCommandsTool;
 use App\Mcp\Tools\UpdateSettingsTool;
@@ -68,6 +69,35 @@ copies. It is not CI, and it is not a way to manage agents.
   the grammar's rules are not guessable from an example.
 - Order matters. A Project must be registered before `add-workspace` will accept it, and a Workspace must
   exist before workflows can be seeded into it or run in it.
+
+## Removing Workspaces
+
+`remove-workspace` deletes a Workspace's worktree directory from disk, and its branch along with it when
+asked. It is addressed by the Workspace path, and all three of `force_delete_worktree`, `delete_branch`
+and `force_delete_branch` are stated on every call rather than defaulted — leaving one out is refused,
+because an unstated flag read as false decides a destruction nobody answered either way.
+A true `force_delete_branch` needs `delete_branch` to be true, and is refused beside a false one rather
+than quietly ignored, which is what git does with that pairing; a false one is how a branch is kept and
+is accepted on every call.
+
+Only a Workspace at rest may be removed — `suspended`, `error` or `unknown`. The primary Workspace is the
+Project's own directory and is never removable. A `ready` Workspace is refused until
+`override-workspace-status` suspends it, and one whose run is still in flight — `pending` or `working` — is
+refused until the run finishes, because the run is executing in the very directory the removal would
+delete. A worktree with local changes is refused by git itself, which is what `force_delete_worktree`
+overrides. That gate is this tool's own: `remove-project` with `remove_worktrees: true` force-removes
+every linked worktree of the Project without reading a single status, in-flight run included, so it is
+not a way round a refusal here.
+
+The worktree is removed before the branch, so the two can part company. `git branch --delete` refuses a
+branch that is not fully merged, and a `delete_branch: true` call against one answers with that refusal
+once the directory is already gone — the message says nothing about the worktree. Do not retry: the
+Workspace no longer resolves, so the second call is `not found`, and no tool here deletes a branch on its
+own. Tell the user to delete it by hand in the repository, or pass `force_delete_branch: true` in the
+first place when the branch is known to be unmerged.
+
+Nothing records a Workspace outside the git worktree, so a removal leaves nothing to clean up
+afterwards — and nothing to undo it with either.
 
 ## Running workflows
 
@@ -121,7 +151,8 @@ reproduces the failure.
   workflows contain. Only the four tools that spawn a shell — `run-workflow`, `launch-terminal`,
   `launch-ide` and `launch-browser` — are gated on the LaborForest side;
   **nothing else here asks the user to confirm a tool call.**
-  Confirm `remove-project`, `run-workflow` and `purge-workflow-logs` with the user before calling them.
+  Confirm `remove-project`, `remove-workspace`, `run-workflow` and `purge-workflow-logs` with the user
+  before calling them.
 - Those four obey the user's shell command execution policy. Under `allow` they run as called. Under
   `require-approval` the call changes nothing and answers `pending manual approval in application UI`:
   LaborForest shows the user the workflow or the command and waits, so treat the work as neither done
@@ -163,6 +194,7 @@ class LaborForestServer extends Server
         AddProjectTool::class,
         RemoveProjectTool::class,
         AddWorkspaceTool::class,
+        RemoveWorkspaceTool::class,
         AddWorkspaceExampleWorkflowsTool::class,
         ValidateWorkflowTool::class,
         RunWorkflowTool::class,

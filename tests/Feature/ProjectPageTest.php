@@ -956,6 +956,49 @@ describe('workspace remove record action', function () {
             ->assertActionHidden(TestAction::make('remove')->table('0'));
     });
 
+    it('is hidden for a workspace whose run is still in flight', function (WorkspaceStatus $status) {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [componentWorkspaceData(path: $this->workspacePath, status: $status)],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionHidden(TestAction::make('remove')->table('0'));
+    })->with([
+        'pending' => [WorkspaceStatus::PENDING],
+        'working' => [WorkspaceStatus::WORKING],
+    ]);
+
+    it('is hidden for the primary workspace, which is the project itself', function () {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [componentWorkspaceData(
+                path: $this->workspacePath,
+                isPrimary: true,
+                status: WorkspaceStatus::SUSPENDED,
+            )],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionHidden(TestAction::make('remove')->table('0'));
+    });
+
+    it('is offered for a workspace left in a status the user clears rather than works in', function (WorkspaceStatus $status) {
+        projectPageServices(
+            project: $this->project,
+            workspaces: [componentWorkspaceData(path: $this->workspacePath, status: $status)],
+            workflows: $this->workflows,
+        );
+
+        Livewire::test(Project::class, ['uuid' => $this->uuid])
+            ->assertActionVisible(TestAction::make('remove')->table('0'));
+    })->with([
+        'error' => [WorkspaceStatus::ERROR],
+        'unknown' => [WorkspaceStatus::UNKNOWN],
+    ]);
+
     it('reports a failed worktree removal and does not reload the project', function () {
         $services = projectPageServices(
             project: $this->project,
